@@ -4,6 +4,58 @@ export function isHeicFile(file: File) {
   return /\.(heic|heif)$/i.test(file.name) || /image\/(heic|heif|heic-sequence|heif-sequence)/i.test(file.type);
 }
 
+export function isBmpFile(file: File) {
+  return /\.bmp$/i.test(file.name) || /image\/(bmp|x-bmp|x-ms-bmp)/i.test(file.type);
+}
+
+export function isTiffFile(file: File) {
+  return /\.(tif|tiff)$/i.test(file.name) || /image\/tiff/i.test(file.type);
+}
+
+export function isRawFile(file: File) {
+  return /\.(3fr|arw|cr2|cr3|dcr|dng|erf|fff|gpr|iiq|k25|kdc|mef|mos|mrw|nef|nrw|orf|pef|raf|raw|rw2|rwl|sr2|srf|srw|x3f)$/i.test(file.name);
+}
+
+export function needsDecodedPreview(file: File) {
+  return isHeicFile(file) || isBmpFile(file) || isTiffFile(file) || isRawFile(file);
+}
+
+export function inputFormatLabel(file: File) {
+  if (isHeicFile(file)) return "HEIC";
+  if (isBmpFile(file)) return "BMP";
+  if (isTiffFile(file)) return "TIFF";
+  if (isRawFile(file)) return "camera RAW";
+  return "image";
+}
+
+function pixelsToBitmap(width: number, height: number, source: ArrayLike<number>, channels: number, maxValue = 255) {
+  const rgba = new Uint8ClampedArray(width * height * 4);
+  const scale = maxValue > 0 ? 255 / maxValue : 1;
+  for (let pixel = 0; pixel < width * height; pixel++) {
+    const sourceOffset = pixel * channels;
+    const targetOffset = pixel * 4;
+    if (channels === 1 || channels === 2) {
+      const grey = Math.round(Number(source[sourceOffset]) * scale);
+      rgba[targetOffset] = grey;
+      rgba[targetOffset + 1] = grey;
+      rgba[targetOffset + 2] = grey;
+      rgba[targetOffset + 3] = channels === 2 ? Math.round(Number(source[sourceOffset + 1]) * scale) : 255;
+    } else {
+      rgba[targetOffset] = Math.round(Number(source[sourceOffset]) * scale);
+      rgba[targetOffset + 1] = Math.round(Number(source[sourceOffset + 1]) * scale);
+      rgba[targetOffset + 2] = Math.round(Number(source[sourceOffset + 2]) * scale);
+      rgba[targetOffset + 3] = channels >= 4 ? Math.round(Number(source[sourceOffset + 3]) * scale) : 255;
+    }
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Canvas is unavailable.");
+  context.putImageData(new ImageData(rgba, width, height), 0, 0);
+  return createImageBitmap(canvas);
+}
+
 export async function loadBitmap(file: File): Promise<ImageBitmap> {
   if (isHeicFile(file)) {
     try {
@@ -14,8 +66,54 @@ export async function loadBitmap(file: File): Promise<ImageBitmap> {
     }
   }
 
+  if (isBmpFile(file)) {
+    try {
+      const { decode } = await import("@nktkas/bmp");
+      const decoded = decode(new Uint8Array(await file.arrayBuffer()));
+      return await pixelsToBitmap(decoded.width, decoded.height, decoded.data, decoded.channels);
+    } catch (error) {
+      const detail = error instanceof Error ? ` ${error.message}` : "";
+      throw new Error(`This BMP image could not be decoded.${detail}`);
+    }
+  }
+
+  if (isTiffFile(file)) {
+    try {
+      const { decode } = await import("tiff");
+      const page = decode(await file.arrayBuffer(), { pages: [0] })[0];
+      if (!page) throw new Error("No TIFF page");
+      const channels = page.samplesPerPixel || page.components + (page.alpha ? 1 : 0);
+      const maxValue = page.data instanceof Uint8Array ? 255 : page.data instanceof Uint16Array ? 65535 : 1;
+      return await pixelsToBitmap(page.width, page.height, page.data, channels, maxValue);
+    } catch {
+      throw new Error("This TIFF image could not be decoded. Try an 8-bit or 16-bit RGB TIFF.");
+    }
+  }
+
+  if (isRawFile(file)) {
+    const { default: LibRaw } = await import("libraw-wasm");
+    const decoder = new LibRaw();
+    try {
+      await decoder.open(new Uint8Array(await file.arrayBuffer()), {
+        useCameraWb: true,
+        useCameraMatrix: 1,
+        outputColor: 1,
+        outputBps: 8,
+        userQual: 3,
+      });
+      const decoded = await decoder.imageData();
+      if (!decoded) throw new Error("No decoded pixels");
+      const maxValue = decoded.bits === 16 ? 65535 : 255;
+      return await pixelsToBitmap(decoded.width, decoded.height, decoded.data, decoded.colors, maxValue);
+    } catch {
+      throw new Error("This camera RAW file could not be developed. Its camera or compression may be unsupported.");
+    } finally {
+      decoder.dispose();
+    }
+  }
+
   if (!file.type.startsWith("image/")) {
-    throw new Error("Please choose a PNG, JPEG, WebP, HEIC or HEIF image.");
+    throw new Error("Please choose a supported image or camera RAW file.");
   }
 
   try {
@@ -28,7 +126,7 @@ export async function loadBitmap(file: File): Promise<ImageBitmap> {
       await image.decode();
       return await createImageBitmap(image);
     } catch {
-      throw new Error("This image could not be read. Please use PNG, JPEG, WebP, HEIC or HEIF.");
+      throw new Error("This image could not be read. Please use a supported image format.");
     } finally {
       URL.revokeObjectURL(url);
     }

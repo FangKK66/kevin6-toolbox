@@ -2,7 +2,7 @@
 
 Four focused, local-first browser tools served at [kevin6.com/toolbox](https://kevin6.com/toolbox/):
 
-- Image Converter — HEIC, HEIF, PNG, JPEG and WebP conversion, resizing and quality controls
+- Image Converter — HEIC/HEIF, BMP, TIFF, camera RAW, PNG, JPEG and WebP input; PNG/JPEG/WebP output
 - Image Rotate — arbitrary rotation, 90° turns and horizontal/vertical flips
 - Image Overlay — drag, scale, rotate, flip and blend a second image
 - LAN Transfer — encrypted browser-to-browser text and file transfer with manual WebRTC pairing

@@ -5,7 +5,7 @@ const tools = [
     number: "01",
     href: "/toolbox/image-converter/",
     title: "Image Converter",
-    description: "Convert HEIC, PNG, JPEG and WebP locally. Resize, tune quality and keep your files private.",
+    description: "Convert HEIC, BMP, TIFF, camera RAW and web images locally. Resize, tune quality and stay private.",
     status: "READY",
     tone: "acid",
   },
