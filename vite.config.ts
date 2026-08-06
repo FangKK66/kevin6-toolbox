@@ -7,6 +7,10 @@ const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 const localBindingConfig = {
   main: "./worker/index.ts",
   compatibility_flags: ["nodejs_compat"],
+  durable_objects: {
+    bindings: [{ name: "PAIR_ROOMS", class_name: "PairRoom" }],
+  },
+  migrations: [{ tag: "v1", new_sqlite_classes: ["PairRoom"] }],
 };
 
 export default defineConfig(async () => {

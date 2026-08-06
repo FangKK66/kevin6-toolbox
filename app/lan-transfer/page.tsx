@@ -8,5 +8,5 @@ export const metadata: Metadata = {
 };
 
 export default function Page() {
-  return <ToolShell compact><ToolHeader index="04" title="LAN Transfer" description="Pair two nearby browsers with a one-time code, then send text or files directly over an encrypted connection." /><LanTransfer /></ToolShell>;
+  return <ToolShell compact><ToolHeader index="04" title="LAN Transfer" description="Pair two nearby browsers with four emojis or a QR code, then send text or files directly over an encrypted connection." /><LanTransfer /></ToolShell>;
 }

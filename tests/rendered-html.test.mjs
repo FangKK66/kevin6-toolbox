@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const routes = [
@@ -38,4 +39,16 @@ test("redirects the bare toolbox path to its canonical URL", async () => {
   const response = await render("/toolbox");
   assert.equal(response.status, 308);
   assert.equal(response.headers.get("location"), "http://localhost/toolbox/");
+});
+
+test("LAN transfer renders the four-emoji pairing flow", async () => {
+  const html = await (await render("/toolbox/lan-transfer/")).text();
+  assert.match(html, /Create an emoji room/i);
+  assert.match(html, /Join room/i);
+});
+
+test("deployment config includes the SQLite pairing room", async () => {
+  const config = JSON.parse(await readFile(new URL("../dist/server/wrangler.json", import.meta.url), "utf8"));
+  assert.deepEqual(config.durable_objects?.bindings, [{ name: "PAIR_ROOMS", class_name: "PairRoom" }]);
+  assert.deepEqual(config.migrations, [{ tag: "v1", new_sqlite_classes: ["PairRoom"] }]);
 });
