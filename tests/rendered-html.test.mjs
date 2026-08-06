@@ -33,3 +33,9 @@ test("homepage links remain inside the /toolbox base path", async () => {
   const html = await (await render("/toolbox/")).text();
   for (const [path] of routes.slice(1)) assert.match(html, new RegExp(`href=["']${path}["']`));
 });
+
+test("redirects the bare toolbox path to its canonical URL", async () => {
+  const response = await render("/toolbox");
+  assert.equal(response.status, 308);
+  assert.equal(response.headers.get("location"), "http://localhost/toolbox/");
+});
