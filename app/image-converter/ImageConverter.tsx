@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { FileDrop } from "../components/FileDrop";
 import { PrivacyNote } from "../components/ToolShell";
-import { canvasToBlob, downloadBlob, formatBytes, loadBitmap, replaceExtension, type OutputFormat } from "../lib/image";
+import { canvasToBlob, containSize, downloadBlob, formatBytes, isHeicFile, loadBitmap, replaceExtension, type OutputFormat } from "../lib/image";
 
 export function ImageConverter() {
   const [file, setFile] = useState<File | null>(null);
@@ -25,11 +25,23 @@ export function ImageConverter() {
     setDimensions({ width: 0, height: 0 });
     setWidth(0);
     setHeight(0);
-    setStatus("Reading image locally…");
+    setStatus(isHeicFile(next) ? "Decoding HEIC locally…" : "Reading image locally…");
     try {
       const bitmap = await loadBitmap(next);
+      let previewFile: Blob = next;
+      if (isHeicFile(next)) {
+        const previewSize = containSize(bitmap.width, bitmap.height, 1600, 1600);
+        const previewCanvas = document.createElement("canvas");
+        previewCanvas.width = previewSize.width;
+        previewCanvas.height = previewSize.height;
+        const previewContext = previewCanvas.getContext("2d");
+        if (!previewContext) throw new Error("Canvas is unavailable.");
+        previewContext.imageSmoothingQuality = "high";
+        previewContext.drawImage(bitmap, 0, 0, previewSize.width, previewSize.height);
+        previewFile = await canvasToBlob(previewCanvas, "image/jpeg", 0.9);
+      }
       setFile(next);
-      setSourceUrl(URL.createObjectURL(next));
+      setSourceUrl(URL.createObjectURL(previewFile));
       setDimensions({ width: bitmap.width, height: bitmap.height });
       setWidth(bitmap.width);
       setHeight(bitmap.height);
@@ -75,7 +87,7 @@ export function ImageConverter() {
       <aside className="control-panel">
         <div className="panel-title"><span>Controls</span><span>01—03</span></div>
         <PrivacyNote />
-        <div className="step"><span className="step-number">01</span><div><FileDrop onFile={selectFile} accept="image/png,image/jpeg,image/webp" /></div></div>
+        <div className="step"><span className="step-number">01</span><div><FileDrop onFile={selectFile} accept="image/png,image/jpeg,image/webp,image/heic,image/heif,.heic,.heif" /></div></div>
         <div className="step"><span className="step-number">02</span><div>
           <div className="field"><label>Output format</label><select value={format} onChange={(event) => setFormat(event.target.value as OutputFormat)}><option value="image/webp">WebP</option><option value="image/jpeg">JPEG</option><option value="image/png">PNG</option></select></div>
           <div className="field-row"><div className="field"><label>Width</label><input type="number" min="1" value={width || ""} onChange={(e) => setSizedWidth(Number(e.target.value))} /></div><div className="field"><label>Height</label><input type="number" min="1" value={height || ""} onChange={(e) => setSizedHeight(Number(e.target.value))} /></div></div>
@@ -86,7 +98,7 @@ export function ImageConverter() {
       </aside>
       <div className="preview-panel">
         <div className="panel-title"><span>Preview</span><span>{dimensions.width ? `${dimensions.width} × ${dimensions.height}` : "NO FILE"}</span></div>
-        <div className="preview-stage">{sourceUrl ? <img src={sourceUrl} alt="Selected file preview" /> : <div className="empty-state"><strong>Your image appears here</strong><span>PNG · JPEG · WebP · browser-supported formats</span></div>}</div>
+        <div className="preview-stage">{sourceUrl ? <img src={sourceUrl} alt="Selected file preview" /> : <div className="empty-state"><strong>Your image appears here</strong><span>PNG · JPEG · WebP · HEIC · HEIF</span></div>}</div>
         <div className="preview-meta"><span>{status}</span><span>Metadata is removed on export</span></div>
       </div>
     </section>

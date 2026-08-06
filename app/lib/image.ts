@@ -1,8 +1,21 @@
 export type OutputFormat = "image/png" | "image/jpeg" | "image/webp";
 
+export function isHeicFile(file: File) {
+  return /\.(heic|heif)$/i.test(file.name) || /image\/(heic|heif|heic-sequence|heif-sequence)/i.test(file.type);
+}
+
 export async function loadBitmap(file: File): Promise<ImageBitmap> {
+  if (isHeicFile(file)) {
+    try {
+      const { heicTo } = await import("heic-to/csp");
+      return await heicTo({ blob: file, type: "bitmap" });
+    } catch {
+      throw new Error("This HEIC image could not be decoded. It may use an unsupported codec.");
+    }
+  }
+
   if (!file.type.startsWith("image/")) {
-    throw new Error("Please choose a PNG, JPEG or WebP image.");
+    throw new Error("Please choose a PNG, JPEG, WebP, HEIC or HEIF image.");
   }
 
   try {
@@ -15,7 +28,7 @@ export async function loadBitmap(file: File): Promise<ImageBitmap> {
       await image.decode();
       return await createImageBitmap(image);
     } catch {
-      throw new Error("This image could not be read. Please use PNG, JPEG or WebP.");
+      throw new Error("This image could not be read. Please use PNG, JPEG, WebP, HEIC or HEIF.");
     } finally {
       URL.revokeObjectURL(url);
     }

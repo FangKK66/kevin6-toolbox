@@ -13,6 +13,7 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
   },
   "dependencies": {
+    "heic-to": "^1.5.2",
     "react": "19.2.6",
     "react-dom": "19.2.6"
   },
