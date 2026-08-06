@@ -1,4 +1,4 @@
-export type OutputFormat = "image/png" | "image/jpeg" | "image/webp";
+export type OutputFormat = "image/png" | "image/jpeg" | "image/webp" | "image/bmp" | "image/tiff";
 
 export function isHeicFile(file: File) {
   return /\.(heic|heif)$/i.test(file.name) || /image\/(heic|heif|heic-sequence|heif-sequence)/i.test(file.type);
@@ -139,8 +139,34 @@ export function canvasToBlob(canvas: HTMLCanvasElement, type: OutputFormat, qual
   });
 }
 
+export async function encodeCanvas(canvas: HTMLCanvasElement, type: OutputFormat, quality = 0.9): Promise<Blob> {
+  if (type !== "image/bmp" && type !== "image/tiff") return canvasToBlob(canvas, type, quality);
+
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Canvas is unavailable.");
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+  const rgba = new Uint8Array(pixels.buffer, pixels.byteOffset, pixels.byteLength);
+
+  if (type === "image/bmp") {
+    const { encode } = await import("@nktkas/bmp");
+    const bytes = encode({ width: canvas.width, height: canvas.height, channels: 4, data: rgba }, {
+      bitsPerPixel: 32,
+      compression: 6,
+      headerType: "BITMAPV5HEADER",
+    });
+    const buffer = new ArrayBuffer(bytes.byteLength);
+    new Uint8Array(buffer).set(bytes);
+    return new Blob([buffer], { type });
+  }
+
+  const { default: UTIF } = await import("utif.ts");
+  return new Blob([UTIF.encodeImage(rgba, canvas.width, canvas.height)], { type });
+}
+
 export function extensionFor(type: OutputFormat) {
-  return type === "image/jpeg" ? "jpg" : type.split("/")[1];
+  if (type === "image/jpeg") return "jpg";
+  if (type === "image/tiff") return "tiff";
+  return type.split("/")[1];
 }
 
 export function downloadBlob(blob: Blob, filename: string) {

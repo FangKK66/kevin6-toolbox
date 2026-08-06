@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { FileDrop } from "../components/FileDrop";
 import { PrivacyNote } from "../components/ToolShell";
-import { canvasToBlob, containSize, downloadBlob, formatBytes, inputFormatLabel, loadBitmap, needsDecodedPreview, replaceExtension, type OutputFormat } from "../lib/image";
+import { canvasToBlob, containSize, downloadBlob, encodeCanvas, formatBytes, inputFormatLabel, loadBitmap, needsDecodedPreview, replaceExtension, type OutputFormat } from "../lib/image";
 
 export function ImageConverter() {
   const [file, setFile] = useState<File | null>(null);
@@ -76,7 +76,7 @@ export function ImageConverter() {
       context.imageSmoothingQuality = "high";
       context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
       bitmap.close();
-      const blob = await canvasToBlob(canvas, format, quality / 100);
+      const blob = await encodeCanvas(canvas, format, quality / 100);
       downloadBlob(blob, replaceExtension(file.name, "-converted", format));
       setStatus(`Done · ${formatBytes(blob.size)} downloaded`);
     } catch (error) { setStatus(error instanceof Error ? error.message : "Conversion failed."); }
@@ -89,9 +89,9 @@ export function ImageConverter() {
         <PrivacyNote />
         <div className="step"><span className="step-number">01</span><div><FileDrop onFile={selectFile} accept="image/png,image/jpeg,image/webp,image/heic,image/heif,image/bmp,image/tiff,.heic,.heif,.bmp,.tif,.tiff,.3fr,.arw,.cr2,.cr3,.dcr,.dng,.erf,.fff,.gpr,.iiq,.k25,.kdc,.mef,.mos,.mrw,.nef,.nrw,.orf,.pef,.raf,.raw,.rw2,.rwl,.sr2,.srf,.srw,.x3f" /></div></div>
         <div className="step"><span className="step-number">02</span><div>
-          <div className="field"><label>Output format</label><select value={format} onChange={(event) => setFormat(event.target.value as OutputFormat)}><option value="image/webp">WebP</option><option value="image/jpeg">JPEG</option><option value="image/png">PNG</option></select></div>
+          <div className="field"><label>Output format</label><select value={format} onChange={(event) => setFormat(event.target.value as OutputFormat)}><option value="image/webp">WebP</option><option value="image/jpeg">JPEG</option><option value="image/png">PNG</option><option value="image/bmp">BMP</option><option value="image/tiff">TIFF</option></select></div>
           <div className="field-row"><div className="field"><label>Width</label><input type="number" min="1" value={width || ""} onChange={(e) => setSizedWidth(Number(e.target.value))} /></div><div className="field"><label>Height</label><input type="number" min="1" value={height || ""} onChange={(e) => setSizedHeight(Number(e.target.value))} /></div></div>
-          {format !== "image/png" && <div className="field"><label>Quality · {quality}%</label><input type="range" min="10" max="100" value={quality} onChange={(e) => setQuality(Number(e.target.value))} /></div>}
+          {(format === "image/jpeg" || format === "image/webp") && <div className="field"><label>Quality · {quality}%</label><input type="range" min="10" max="100" value={quality} onChange={(e) => setQuality(Number(e.target.value))} /></div>}
           {format === "image/jpeg" && <div className="field"><label>Transparency background</label><input type="color" value={background} onChange={(e) => setBackground(e.target.value)} /></div>}
         </div></div>
         <div className="step"><span className="step-number">03</span><div><button className="button primary" disabled={!file} onClick={convert}>Convert & download</button></div></div>

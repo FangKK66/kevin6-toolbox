@@ -18,7 +18,8 @@
     "libraw-wasm": "^1.6.0",
     "react": "19.2.6",
     "react-dom": "19.2.6",
-    "tiff": "^7.1.3"
+    "tiff": "^7.1.3",
+    "utif.ts": "^3.1.1"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.37.1",
