@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { FileDrop } from "../components/FileDrop";
+import { MobileSaveActions } from "../components/MobileSaveActions";
 import { PrivacyNote } from "../components/ToolShell";
-import { canvasToBlob, downloadBlob, loadBitmap, replaceExtension, type OutputFormat } from "../lib/image";
+import { canUseNativeFileShare, canvasToBlob, downloadBlob, loadBitmap, replaceExtension, type OutputFormat, type PreparedImage } from "../lib/image";
 
 type Point = { x: number; y: number };
 
@@ -21,6 +22,8 @@ export function ImageOverlay() {
   const [flipY, setFlipY] = useState(false);
   const [format, setFormat] = useState<OutputFormat>("image/png");
   const [quality, setQuality] = useState(92);
+  const [status, setStatus] = useState("Waiting for images");
+  const [prepared, setPrepared] = useState<PreparedImage | null>(null);
 
   useEffect(() => {
     if (!base) return;
@@ -33,6 +36,8 @@ export function ImageOverlay() {
     base?.close();
     setBaseFile(file);
     setBase(image);
+    setPrepared(null);
+    setStatus(`${image.width} × ${image.height} base image`);
     setPosition({ x: image.width / 2, y: image.height / 2 });
   }
 
@@ -40,6 +45,7 @@ export function ImageOverlay() {
     const image = await loadBitmap(file);
     layer?.close();
     setLayer(image);
+    setPrepared(null);
     if (base) setPosition({ x: base.width / 2, y: base.height / 2 });
   }
 
@@ -90,10 +96,13 @@ export function ImageOverlay() {
 
   async function exportImage() {
     if (!base || !baseFile) return;
+    setPrepared(null);
     const canvas = document.createElement("canvas");
     draw(canvas, true);
     const blob = await canvasToBlob(canvas, format, quality / 100);
-    downloadBlob(blob, replaceExtension(baseFile.name, "-overlay", format));
+    const result = { blob, filename: replaceExtension(baseFile.name, "-overlay", format) };
+    if (canUseNativeFileShare(result)) { setPrepared(result); setStatus("Ready · tap Save or share"); }
+    else { downloadBlob(blob, result.filename); setStatus("Composition downloaded"); }
   }
 
   const center = () => base && setPosition({ x: base.width / 2, y: base.height / 2 });
@@ -112,8 +121,9 @@ export function ImageOverlay() {
         <div className="field"><label>Output</label><select value={format} onChange={(e) => setFormat(e.target.value as OutputFormat)}><option value="image/png">PNG</option><option value="image/jpeg">JPEG</option><option value="image/webp">WebP</option></select></div>
         {format !== "image/png" && <div className="field"><label>Quality · {quality}%</label><input type="range" min="10" max="100" value={quality} onChange={(e) => setQuality(Number(e.target.value))} /></div>}
         <button className="button primary" disabled={!base || !layer} onClick={exportImage}>Export composition</button>
+        {prepared && <MobileSaveActions result={prepared} onStatus={setStatus} />}
       </div></div>
     </aside>
-    <div className="preview-panel"><div className="panel-title"><span>Composition</span><span>DRAG TO POSITION</span></div><div className="preview-stage">{base ? <div className="canvas-wrap"><canvas ref={canvasRef} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={() => { dragRef.current = null; }} onPointerCancel={() => { dragRef.current = null; }} aria-label="Image composition preview" /></div> : <div className="empty-state"><strong>Composition preview</strong><span>Choose a base image to begin</span></div>}</div><div className="preview-meta"><span>{base ? `${base.width} × ${base.height} output` : "Waiting for images"}</span><span>Export uses the base image resolution</span></div></div>
+    <div className="preview-panel"><div className="panel-title"><span>Composition</span><span>DRAG TO POSITION</span></div><div className="preview-stage">{base ? <div className="canvas-wrap"><canvas ref={canvasRef} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={() => { dragRef.current = null; }} onPointerCancel={() => { dragRef.current = null; }} aria-label="Image composition preview" /></div> : <div className="empty-state"><strong>Composition preview</strong><span>Choose a base image to begin</span></div>}</div><div className="preview-meta"><span>{status}</span><span>Export uses the base image resolution</span></div></div>
   </section>;
 }

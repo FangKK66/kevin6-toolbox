@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { FileDrop } from "../components/FileDrop";
+import { MobileSaveActions } from "../components/MobileSaveActions";
 import { PrivacyNote } from "../components/ToolShell";
-import { canvasToBlob, containSize, downloadBlob, encodeCanvas, formatBytes, inputFormatLabel, loadBitmap, needsDecodedPreview, replaceExtension, type OutputFormat } from "../lib/image";
+import { canUseNativeFileShare, canvasToBlob, containSize, downloadBlob, encodeCanvas, formatBytes, inputFormatLabel, loadBitmap, needsDecodedPreview, replaceExtension, type OutputFormat, type PreparedImage } from "../lib/image";
 
 export function ImageConverter() {
   const [file, setFile] = useState<File | null>(null);
@@ -15,6 +16,7 @@ export function ImageConverter() {
   const [quality, setQuality] = useState(88);
   const [background, setBackground] = useState("#ffffff");
   const [status, setStatus] = useState("Waiting for an image");
+  const [prepared, setPrepared] = useState<PreparedImage | null>(null);
 
   useEffect(() => () => { if (sourceUrl) URL.revokeObjectURL(sourceUrl); }, [sourceUrl]);
 
@@ -26,6 +28,7 @@ export function ImageConverter() {
     setWidth(0);
     setHeight(0);
     setStatus(needsDecodedPreview(next) ? `Decoding ${inputFormatLabel(next)} locally…` : "Reading image locally…");
+    setPrepared(null);
     try {
       const bitmap = await loadBitmap(next);
       let previewFile: Blob = next;
@@ -65,6 +68,7 @@ export function ImageConverter() {
   async function convert() {
     if (!file) return;
     setStatus("Converting locally…");
+    setPrepared(null);
     try {
       const bitmap = await loadBitmap(file);
       const canvas = document.createElement("canvas");
@@ -77,8 +81,14 @@ export function ImageConverter() {
       context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
       bitmap.close();
       const blob = await encodeCanvas(canvas, format, quality / 100);
-      downloadBlob(blob, replaceExtension(file.name, "-converted", format));
-      setStatus(`Done · ${formatBytes(blob.size)} downloaded`);
+      const result = { blob, filename: replaceExtension(file.name, "-converted", format) };
+      if (canUseNativeFileShare(result)) {
+        setPrepared(result);
+        setStatus(`Ready · ${formatBytes(blob.size)} · tap Save or share`);
+      } else {
+        downloadBlob(blob, result.filename);
+        setStatus(`Done · ${formatBytes(blob.size)} downloaded`);
+      }
     } catch (error) { setStatus(error instanceof Error ? error.message : "Conversion failed."); }
   }
 
@@ -94,7 +104,7 @@ export function ImageConverter() {
           {(format === "image/jpeg" || format === "image/webp") && <div className="field"><label>Quality · {quality}%</label><input type="range" min="10" max="100" value={quality} onChange={(e) => setQuality(Number(e.target.value))} /></div>}
           {format === "image/jpeg" && <div className="field"><label>Transparency background</label><input type="color" value={background} onChange={(e) => setBackground(e.target.value)} /></div>}
         </div></div>
-        <div className="step"><span className="step-number">03</span><div><button className="button primary" disabled={!file} onClick={convert}>Convert & download</button></div></div>
+        <div className="step"><span className="step-number">03</span><div><button className="button primary" disabled={!file} onClick={convert}>Convert image</button>{prepared && <MobileSaveActions result={prepared} onStatus={setStatus} />}</div></div>
       </aside>
       <div className="preview-panel">
         <div className="panel-title"><span>Preview</span><span>{dimensions.width ? `${dimensions.width} × ${dimensions.height}` : "NO FILE"}</span></div>

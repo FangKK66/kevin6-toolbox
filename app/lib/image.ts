@@ -1,4 +1,5 @@
 export type OutputFormat = "image/png" | "image/jpeg" | "image/webp" | "image/bmp" | "image/tiff";
+export type PreparedImage = { blob: Blob; filename: string };
 
 export function isHeicFile(file: File) {
   return /\.(heic|heif)$/i.test(file.name) || /image\/(heic|heif|heic-sequence|heif-sequence)/i.test(file.type);
@@ -176,6 +177,24 @@ export function downloadBlob(blob: Blob, filename: string) {
   link.download = filename;
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function shareFile({ blob, filename }: PreparedImage) {
+  return new File([blob], filename, { type: blob.type, lastModified: Date.now() });
+}
+
+export function canUseNativeFileShare(result: PreparedImage) {
+  if (typeof window === "undefined" || typeof navigator.share !== "function" || typeof navigator.canShare !== "function") return false;
+  const touchDevice = navigator.maxTouchPoints > 0 && window.matchMedia("(pointer: coarse)").matches;
+  return touchDevice && navigator.canShare({ files: [shareFile(result)] });
+}
+
+export async function shareImage(result: PreparedImage) {
+  const file = shareFile(result);
+  if (typeof navigator.share !== "function" || typeof navigator.canShare !== "function" || !navigator.canShare({ files: [file] })) {
+    throw new Error("This browser cannot share the selected image format.");
+  }
+  await navigator.share({ files: [file], title: result.filename });
 }
 
 export function replaceExtension(name: string, suffix: string, type: OutputFormat) {
