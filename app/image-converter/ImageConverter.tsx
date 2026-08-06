@@ -20,14 +20,24 @@ export function ImageConverter() {
 
   async function selectFile(next: File) {
     if (sourceUrl) URL.revokeObjectURL(sourceUrl);
-    const bitmap = await loadBitmap(next);
-    setFile(next);
-    setSourceUrl(URL.createObjectURL(next));
-    setDimensions({ width: bitmap.width, height: bitmap.height });
-    setWidth(bitmap.width);
-    setHeight(bitmap.height);
-    setStatus(`${next.name} · ${formatBytes(next.size)}`);
-    bitmap.close();
+    setFile(null);
+    setSourceUrl("");
+    setDimensions({ width: 0, height: 0 });
+    setWidth(0);
+    setHeight(0);
+    setStatus("Reading image locally…");
+    try {
+      const bitmap = await loadBitmap(next);
+      setFile(next);
+      setSourceUrl(URL.createObjectURL(next));
+      setDimensions({ width: bitmap.width, height: bitmap.height });
+      setWidth(bitmap.width);
+      setHeight(bitmap.height);
+      setStatus(`${next.name} · ${formatBytes(next.size)}`);
+      bitmap.close();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "This image could not be read.");
+    }
   }
 
   function setSizedWidth(value: number) {
@@ -65,7 +75,7 @@ export function ImageConverter() {
       <aside className="control-panel">
         <div className="panel-title"><span>Controls</span><span>01—03</span></div>
         <PrivacyNote />
-        <div className="step"><span className="step-number">01</span><div><FileDrop onFile={selectFile} /></div></div>
+        <div className="step"><span className="step-number">01</span><div><FileDrop onFile={selectFile} accept="image/png,image/jpeg,image/webp" /></div></div>
         <div className="step"><span className="step-number">02</span><div>
           <div className="field"><label>Output format</label><select value={format} onChange={(event) => setFormat(event.target.value as OutputFormat)}><option value="image/webp">WebP</option><option value="image/jpeg">JPEG</option><option value="image/png">PNG</option></select></div>
           <div className="field-row"><div className="field"><label>Width</label><input type="number" min="1" value={width || ""} onChange={(e) => setSizedWidth(Number(e.target.value))} /></div><div className="field"><label>Height</label><input type="number" min="1" value={height || ""} onChange={(e) => setSizedHeight(Number(e.target.value))} /></div></div>

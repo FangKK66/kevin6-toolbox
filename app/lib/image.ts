@@ -1,7 +1,25 @@
 export type OutputFormat = "image/png" | "image/jpeg" | "image/webp";
 
-export function loadBitmap(file: File): Promise<ImageBitmap> {
-  return createImageBitmap(file, { imageOrientation: "from-image" });
+export async function loadBitmap(file: File): Promise<ImageBitmap> {
+  if (!file.type.startsWith("image/")) {
+    throw new Error("Please choose a PNG, JPEG or WebP image.");
+  }
+
+  try {
+    return await createImageBitmap(file, { imageOrientation: "from-image" });
+  } catch {
+    const url = URL.createObjectURL(file);
+    try {
+      const image = new Image();
+      image.src = url;
+      await image.decode();
+      return await createImageBitmap(image);
+    } catch {
+      throw new Error("This image could not be read. Please use PNG, JPEG or WebP.");
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
 }
 
 export function canvasToBlob(canvas: HTMLCanvasElement, type: OutputFormat, quality = 0.9): Promise<Blob> {
