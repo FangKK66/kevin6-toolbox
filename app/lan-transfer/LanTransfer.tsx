@@ -47,6 +47,8 @@ function validEmojiCode(value: string) {
 }
 
 export function LanTransfer() {
+  const activityLogRef = useRef<HTMLDivElement | null>(null);
+  const followLatestActivityRef = useRef(true);
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const channelRef = useRef<RTCDataChannel | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
@@ -97,6 +99,18 @@ export function LanTransfer() {
     })).then((url) => { if (active) setQrUrl(url); });
     return () => { active = false; };
   }, [roomUrl]);
+
+  useEffect(() => {
+    const activityLog = activityLogRef.current;
+    if (activityLog && followLatestActivityRef.current) activityLog.scrollTop = activityLog.scrollHeight;
+  }, [logs]);
+
+  function handleActivityScroll() {
+    const activityLog = activityLogRef.current;
+    if (!activityLog) return;
+    const distanceFromBottom = activityLog.scrollHeight - activityLog.scrollTop - activityLog.clientHeight;
+    followLatestActivityRef.current = distanceFromBottom <= 4;
+  }
 
   function log(text: string, remote = false) {
     const id = Date.now() + Math.random();
@@ -485,7 +499,7 @@ export function LanTransfer() {
       <div className="field"><label>Text</label><textarea value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Type or paste a message" /><button className="button primary" disabled={!connected || !message.trim()} onClick={sendText}>Send text</button></div>
       <div className="step"><span className="step-number">FILE</span><div><FileDrop onFile={setFile} label="Choose any file" accept="" /><p className="field-label">{file ? `${file.name} · ${formatBytes(file.size)}` : "Choose a file after connecting"}</p><button className="button primary" disabled={!connected || !file || sending} onClick={sendFile}>{sending ? "Sending file…" : "Send file"}</button></div></div>
       <div className="panel-title"><span>Activity</span><span>{logs.length}</span></div>
-      <div className="message-log">{logs.length ? logs.map((item) => <div className={`message ${item.remote ? "remote" : ""} ${item.transferStatus ? `transfer ${item.transferStatus}` : ""}`} key={item.id}>
+      <div className="message-log" ref={activityLogRef} onScroll={handleActivityScroll}>{logs.length ? logs.map((item, index) => <div className={`message ${item.remote ? "remote" : ""} ${item.transferStatus ? `transfer ${item.transferStatus}` : ""} ${index === logs.length - 1 ? "message-new" : ""}`} key={item.id}>
         <div className="message-text">{item.text}{typeof item.progress === "number" && <span>{item.progress}%</span>}</div>
         {typeof item.progress === "number" && <div className="transfer-progress" role="progressbar" aria-label={item.text} aria-valuemin={0} aria-valuemax={100} aria-valuenow={item.progress}><span style={{ width: `${item.progress}%` }} /></div>}
       </div>) : <div className="empty-state"><strong>No activity yet</strong><span>Pair another device to start</span></div>}</div>

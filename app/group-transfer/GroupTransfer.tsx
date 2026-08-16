@@ -63,6 +63,8 @@ function deviceLabel(id: string) {
 }
 
 export function GroupTransfer() {
+  const activityLogRef = useRef<HTMLDivElement | null>(null);
+  const followLatestActivityRef = useRef(true);
   const socketRef = useRef<WebSocket | null>(null);
   const selfIdRef = useRef("");
   const peersRef = useRef(new Map<string, PeerEntry>());
@@ -110,6 +112,18 @@ export function GroupTransfer() {
     })).then((url) => { if (active) setQrUrl(url); });
     return () => { active = false; };
   }, [roomUrl]);
+
+  useEffect(() => {
+    const activityLog = activityLogRef.current;
+    if (activityLog && followLatestActivityRef.current) activityLog.scrollTop = activityLog.scrollHeight;
+  }, [activities]);
+
+  function handleActivityScroll() {
+    const activityLog = activityLogRef.current;
+    if (!activityLog) return;
+    const distanceFromBottom = activityLog.scrollHeight - activityLog.scrollTop - activityLog.clientHeight;
+    followLatestActivityRef.current = distanceFromBottom <= 4;
+  }
 
   function addActivity(item: Omit<ActivityItem, "id">) {
     const id = crypto.randomUUID();
@@ -501,12 +515,12 @@ export function GroupTransfer() {
       <div className="field"><label>Text</label><textarea value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Type or paste a message" /><button className="button primary" disabled={!canSend || !message.trim()} onClick={sendText}>Send text</button></div>
       <div className="step"><span className="step-number">FILE</span><div><FileDrop onFile={setFile} label="Choose any file" accept="" /><p className="field-label">{file ? `${file.name} · ${formatBytes(file.size)}` : "Choose a file after devices connect"}</p><button className="button primary" disabled={!canSend || !file || sending} onClick={sendFile}>{sending ? "Sending file…" : "Send file"}</button></div></div>
       <div className="panel-title"><span>Activity</span><span>{activities.length}</span></div>
-      <div className="message-log group-activity">{activities.length ? activities.map((item) => {
+      <div className="message-log group-activity" ref={activityLogRef} onScroll={handleActivityScroll}>{activities.length ? activities.map((item, index) => {
         const progress = item.recipients?.length
           ? Math.floor(item.recipients.reduce((total, recipient) => total + recipient.progress, 0) / item.recipients.length)
           : item.progress;
         const hasError = item.status === "error" || item.recipients?.some((recipient) => recipient.status === "error");
-        return <div className={`message ${item.remote ? "remote" : ""} ${typeof progress === "number" ? "transfer" : ""} ${hasError ? "error" : item.status ?? ""}`} key={item.id}>
+        return <div className={`message ${item.remote ? "remote" : ""} ${typeof progress === "number" ? "transfer" : ""} ${hasError ? "error" : item.status ?? ""} ${index === activities.length - 1 ? "message-new" : ""}`} key={item.id}>
           <div className="message-text">{item.text}{typeof progress === "number" && <span>{progress}%</span>}</div>
           {typeof progress === "number" && <div className="transfer-progress" role="progressbar" aria-label={item.text} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}><span style={{ width: `${progress}%` }} /></div>}
           {item.recipients?.map((recipient) => <div className={`recipient-progress ${recipient.status}`} key={recipient.peerId}><span>{recipient.label}</span><span>{recipient.status === "error" ? "FAILED" : `${recipient.progress}%`}</span></div>)}

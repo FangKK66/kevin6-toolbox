@@ -129,8 +129,9 @@ input[type="color"] { width: 100%; height: 40px; border: 1px solid var(--line); 
 .participant.failed i { background: var(--orange); }
 .participant small { color: var(--muted); font: 8px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; }
 .participant input { accent-color: var(--acid); }
-.message-log { min-height: 250px; max-height: 380px; overflow: auto; border-radius: 10px; background: #10110e; padding: 14px; }
+.message-log { height: 380px; overflow-y: auto; overscroll-behavior: contain; border-radius: 10px; background: #10110e; padding: 14px; scrollbar-gutter: stable; }
 .message { margin-bottom: 10px; border-left: 2px solid var(--acid); padding: 7px 10px; color: #d6d4cc; font-size: 12px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+.message.message-new { animation: activity-highlight 1.15s ease-out; }
 .message.remote { border-color: var(--blue); }
 .message.transfer { padding-block: 9px; }
 .message.transfer.complete { color: var(--paper); }
@@ -144,6 +145,11 @@ input[type="color"] { width: 100%; height: 40px; border: 1px solid var(--line); 
 .recipient-progress { display: flex; justify-content: space-between; gap: 12px; margin-top: 7px; color: var(--muted); font: 8px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .04em; }
 .recipient-progress.complete { color: var(--acid); }
 .recipient-progress.error { color: var(--orange); }
+
+@keyframes activity-highlight {
+  0%, 28% { background: rgba(217,255,87,.18); box-shadow: 0 0 0 1px rgba(217,255,87,.14); }
+  100% { background: transparent; box-shadow: 0 0 0 1px transparent; }
+}
 
 @media (max-width: 850px) {
   .catalog-hero { grid-template-columns: 1fr; min-height: 500px; }
@@ -165,4 +171,4 @@ input[type="color"] { width: 100%; height: 40px; border: 1px solid var(--line); 
   .back-link { margin-bottom: 35px; }
 }
 
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }
