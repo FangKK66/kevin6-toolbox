@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { FileDrop } from "../components/FileDrop";
+import { ImageClaritySelector, qualityForClarity, type ImageClarity } from "../components/ImageClarity";
 import { MobileSaveActions } from "../components/MobileSaveActions";
 import { PrivacyNote } from "../components/ToolShell";
 import { canUseNativeFileShare, canvasToBlob, downloadBlob, loadBitmap, replaceExtension, type OutputFormat, type PreparedImage } from "../lib/image";
@@ -21,7 +22,7 @@ export function ImageOverlay() {
   const [flipX, setFlipX] = useState(false);
   const [flipY, setFlipY] = useState(false);
   const [format, setFormat] = useState<OutputFormat>("image/png");
-  const [quality, setQuality] = useState(92);
+  const [clarity, setClarity] = useState<ImageClarity>("maximum");
   const [status, setStatus] = useState("Waiting for images");
   const [prepared, setPrepared] = useState<PreparedImage | null>(null);
 
@@ -99,7 +100,7 @@ export function ImageOverlay() {
     setPrepared(null);
     const canvas = document.createElement("canvas");
     draw(canvas, true);
-    const blob = await canvasToBlob(canvas, format, quality / 100);
+    const blob = await canvasToBlob(canvas, format, qualityForClarity(clarity));
     const result = { blob, filename: replaceExtension(baseFile.name, "-overlay", format) };
     if (canUseNativeFileShare(result)) { setPrepared(result); setStatus("Ready · tap Save or share"); }
     else { downloadBlob(blob, result.filename); setStatus("Composition downloaded"); }
@@ -119,7 +120,7 @@ export function ImageOverlay() {
       </div></div>
       <div className="step"><span className="step-number">04</span><div>
         <div className="field"><label>Output</label><select value={format} onChange={(e) => setFormat(e.target.value as OutputFormat)}><option value="image/png">PNG</option><option value="image/jpeg">JPEG</option><option value="image/webp">WebP</option></select></div>
-        {format !== "image/png" && <div className="field"><label>Quality · {quality}%</label><input type="range" min="10" max="100" value={quality} onChange={(e) => setQuality(Number(e.target.value))} /></div>}
+        {format !== "image/png" && <ImageClaritySelector value={clarity} onChange={setClarity} />}
         <button className="button primary" disabled={!base || !layer} onClick={exportImage}>Export composition</button>
         {prepared && <MobileSaveActions result={prepared} onStatus={setStatus} />}
       </div></div>

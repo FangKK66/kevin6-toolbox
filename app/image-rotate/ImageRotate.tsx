@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { FileDrop } from "../components/FileDrop";
+import { ImageClaritySelector, qualityForClarity, type ImageClarity } from "../components/ImageClarity";
 import { MobileSaveActions } from "../components/MobileSaveActions";
 import { PrivacyNote } from "../components/ToolShell";
 import { canUseNativeFileShare, canvasToBlob, downloadBlob, loadBitmap, replaceExtension, type OutputFormat, type PreparedImage } from "../lib/image";
@@ -14,7 +15,7 @@ export function ImageRotate() {
   const [flipX, setFlipX] = useState(false);
   const [flipY, setFlipY] = useState(false);
   const [format, setFormat] = useState<OutputFormat>("image/png");
-  const [quality, setQuality] = useState(92);
+  const [clarity, setClarity] = useState<ImageClarity>("maximum");
   const [background, setBackground] = useState("#ffffff");
   const [status, setStatus] = useState("Waiting for an image");
   const [prepared, setPrepared] = useState<PreparedImage | null>(null);
@@ -48,7 +49,7 @@ export function ImageRotate() {
     if (!file || !bitmap) return;
     setPrepared(null);
     const canvas = document.createElement("canvas"); render(canvas, bitmap, angle, flipX, flipY, true, background);
-    const blob = await canvasToBlob(canvas, format, quality / 100);
+    const blob = await canvasToBlob(canvas, format, qualityForClarity(clarity));
     const result = { blob, filename: replaceExtension(file.name, `-rotated-${Math.round(angle)}`, format) };
     if (canUseNativeFileShare(result)) { setPrepared(result); setStatus("Ready · tap Save or share"); }
     else { downloadBlob(blob, result.filename); setStatus("New image downloaded"); }
@@ -62,7 +63,7 @@ export function ImageRotate() {
         <div className="field"><label>Custom angle · {angle}°</label><input type="range" min="-180" max="180" value={angle} onChange={(e) => setAngle(Number(e.target.value))} /></div>
         <div className="field"><label>Flip</label><div className="button-row"><button className={`button ${flipX ? "active" : ""}`} onClick={() => setFlipX(!flipX)}>Horizontal</button><button className={`button ${flipY ? "active" : ""}`} onClick={() => setFlipY(!flipY)}>Vertical</button><button className="button" onClick={() => { setAngle(0); setFlipX(false); setFlipY(false); }}>Reset</button></div></div>
       </div></div>
-      <div className="step"><span className="step-number">03</span><div><div className="field"><label>Output</label><select value={format} onChange={(e) => setFormat(e.target.value as OutputFormat)}><option value="image/png">PNG</option><option value="image/jpeg">JPEG</option><option value="image/webp">WebP</option></select></div>{format !== "image/png" && <div className="field"><label>Quality · {quality}%</label><input type="range" min="10" max="100" value={quality} onChange={(e) => setQuality(Number(e.target.value))} /></div>}{format === "image/jpeg" && <div className="field"><label>Background</label><input type="color" value={background} onChange={(e) => setBackground(e.target.value)} /></div>}<button className="button primary" disabled={!file} onClick={exportImage}>Create new image</button>{prepared && <MobileSaveActions result={prepared} onStatus={setStatus} />}</div></div>
+      <div className="step"><span className="step-number">03</span><div><div className="field"><label>Output</label><select value={format} onChange={(e) => setFormat(e.target.value as OutputFormat)}><option value="image/png">PNG</option><option value="image/jpeg">JPEG</option><option value="image/webp">WebP</option></select></div>{format !== "image/png" && <ImageClaritySelector value={clarity} onChange={setClarity} />}{format === "image/jpeg" && <div className="field"><label>Background</label><input type="color" value={background} onChange={(e) => setBackground(e.target.value)} /></div>}<button className="button primary" disabled={!file} onClick={exportImage}>Create new image</button>{prepared && <MobileSaveActions result={prepared} onStatus={setStatus} />}</div></div>
     </aside>
     <div className="preview-panel"><div className="panel-title"><span>Live preview</span><span>{angle}°</span></div><div className="preview-stage">{bitmap ? <canvas ref={canvasRef} aria-label="Rotated image preview" /> : <div className="empty-state"><strong>Transform preview</strong><span>Choose an image to begin</span></div>}</div><div className="preview-meta"><span>{status}</span><span>Original file remains untouched</span></div></div>
   </section>;

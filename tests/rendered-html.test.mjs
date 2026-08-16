@@ -9,6 +9,7 @@ const routes = [
   ["/toolbox/image-overlay/", "Image Overlay"],
   ["/toolbox/lan-transfer/", "Pair Transfer"],
   ["/toolbox/group-transfer/", "Group Transfer"],
+  ["/toolbox/document-scanner/", "Document Scanner"],
 ];
 
 async function render(path) {
@@ -83,4 +84,48 @@ test("deployment config includes the SQLite pairing room", async () => {
     { tag: "v1", new_sqlite_classes: ["PairRoom"] },
     { tag: "v2", new_sqlite_classes: ["GroupRoom"] },
   ]);
+});
+
+test("document scanner keeps processing local and includes batch exports", async () => {
+  const source = await readFile(new URL("../app/document-scanner/DocumentScanner.tsx", import.meta.url), "utf8");
+  assert.match(source, /Processed locally in your browser|PrivacyNote/);
+  assert.match(source, /All images · ZIP/);
+  assert.match(source, /Create PDF/);
+  assert.match(source, /multiple/);
+  assert.match(source, /capture="environment"/);
+});
+
+test("document scanner provides automatic and manual four-corner correction", async () => {
+  const worker = await readFile(new URL("../app/document-scanner/scanner.worker.ts", import.meta.url), "utf8");
+  const editor = await readFile(new URL("../app/document-scanner/CornerEditor.tsx", import.meta.url), "utf8");
+  assert.match(worker, /findContours/);
+  assert.match(worker, /getPerspectiveTransform/);
+  assert.match(worker, /adaptiveThreshold/);
+  assert.match(editor, /corner-handle/);
+  assert.match(editor, /ArrowLeft/);
+});
+
+test("document scanner build emits its local OpenCV worker assets", async () => {
+  const worker = await readFile(new URL("../dist/client/vendor/scanner.worker.js", import.meta.url), "utf8");
+  const opencv = await readFile(new URL("../dist/client/vendor/opencv.js", import.meta.url));
+  assert.match(worker, /importScripts\(["']\/toolbox\/vendor\/opencv\.js/);
+  assert.ok(opencv.byteLength > 1_000_000, "expected the local OpenCV runtime asset");
+});
+
+test("all image quality controls use the shared three-option clarity selector", async () => {
+  const selector = await readFile(new URL("../app/components/ImageClarity.tsx", import.meta.url), "utf8");
+  assert.match(selector, /Best quality/);
+  assert.match(selector, /Balanced/);
+  assert.match(selector, /Small file/);
+  assert.match(selector, /useState<ImageClarity>|value: "maximum"/);
+  for (const path of [
+    "../app/image-converter/ImageConverter.tsx",
+    "../app/image-rotate/ImageRotate.tsx",
+    "../app/image-overlay/ImageOverlay.tsx",
+    "../app/document-scanner/DocumentScanner.tsx",
+  ]) {
+    const source = await readFile(new URL(path, import.meta.url), "utf8");
+    assert.match(source, /ImageClaritySelector/);
+    assert.doesNotMatch(source, /<label>Quality/);
+  }
 });

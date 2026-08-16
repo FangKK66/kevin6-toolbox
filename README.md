@@ -1,12 +1,13 @@
 # Kevin6 Toolbox
 
-Five focused, local-first browser tools served at [kevin6.com/toolbox](https://kevin6.com/toolbox/):
+Six focused, local-first browser tools served at [kevin6.com/toolbox](https://kevin6.com/toolbox/):
 
 - Image Converter — HEIC/HEIF, BMP, TIFF, camera RAW, PNG, JPEG and WebP input; PNG/JPEG/WebP/BMP/TIFF output
 - Image Rotate — arbitrary rotation, 90° turns and horizontal/vertical flips
 - Image Overlay — drag, scale, rotate, flip and blend a second image
 - Pair Transfer — encrypted browser-to-browser transfer for two devices with four-emoji or QR pairing
 - Group Transfer — direct encrypted text and file transfer for up to four devices with recipient selection
+- Document Scanner — local corner detection, perspective correction, scan enhancement, image/ZIP export and multi-page PDF creation
 
 No account is required. Image processing happens entirely in the browser.
 

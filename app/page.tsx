@@ -41,6 +41,14 @@ const tools = [
     status: "LAB",
     tone: "acid",
   },
+  {
+    number: "06",
+    href: "/toolbox/document-scanner/",
+    title: "Document Scanner",
+    description: "Fix document corners, clean up every page and export images or a PDF without uploading your files.",
+    status: "LAB",
+    tone: "paper",
+  },
 ];
 
 export default function ToolboxHome() {
@@ -52,7 +60,7 @@ export default function ToolboxHome() {
           <h1>Pick a tool.<br /><em>Get it done.</em></h1>
         </div>
         <p className="hero-note">
-          Five focused tools. No accounts, no uploads, no clutter. Your files stay private by default.
+          Six focused tools. No accounts, no uploads, no clutter. Your files stay private by default.
         </p>
       </section>
 
