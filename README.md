@@ -1,13 +1,16 @@
 # Kevin6 Toolbox
 
-Four focused, local-first browser tools served at [kevin6.com/toolbox](https://kevin6.com/toolbox/):
+Five focused, local-first browser tools served at [kevin6.com/toolbox](https://kevin6.com/toolbox/):
 
 - Image Converter — HEIC/HEIF, BMP, TIFF, camera RAW, PNG, JPEG and WebP input; PNG/JPEG/WebP/BMP/TIFF output
 - Image Rotate — arbitrary rotation, 90° turns and horizontal/vertical flips
 - Image Overlay — drag, scale, rotate, flip and blend a second image
-- LAN Transfer — encrypted browser-to-browser transfer with four-emoji or QR pairing
+- Pair Transfer — encrypted browser-to-browser transfer for two devices with four-emoji or QR pairing
+- Group Transfer — direct encrypted text and file transfer for up to four devices with recipient selection
 
 No account is required. Image processing happens entirely in the browser.
+
+Pair Transfer and Group Transfer use temporary Cloudflare Durable Object rooms for WebRTC signaling only. Text and files travel through encrypted browser-to-browser DataChannels and are not stored by Kevin6. Free Cloudflare STUN discovery is enabled; TURN relay is not used, so restrictive public Wi-Fi networks may block direct connections.
 
 ## Local development
 

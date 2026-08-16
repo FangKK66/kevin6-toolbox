@@ -7,7 +7,8 @@ const routes = [
   ["/toolbox/image-converter/", "Image Converter"],
   ["/toolbox/image-rotate/", "Image Rotate"],
   ["/toolbox/image-overlay/", "Image Overlay"],
-  ["/toolbox/lan-transfer/", "LAN Transfer"],
+  ["/toolbox/lan-transfer/", "Pair Transfer"],
+  ["/toolbox/group-transfer/", "Group Transfer"],
 ];
 
 async function render(path) {
@@ -63,8 +64,23 @@ test("LAN transfer uses free STUN discovery and renders transfer progress", asyn
   assert.match(source, /aria-valuenow/);
 });
 
+test("Group Transfer implements a four-device targeted mesh", async () => {
+  const source = await readFile(new URL("../app/group-transfer/GroupTransfer.tsx", import.meta.url), "utf8");
+  assert.match(source, /MAX_DEVICES = 4/);
+  assert.match(source, /selectedRecipients/);
+  assert.match(source, /stun:stun\.cloudflare\.com:3478/);
+  assert.match(source, /file-received/);
+  assert.match(source, /recipient-progress/);
+});
+
 test("deployment config includes the SQLite pairing room", async () => {
   const config = JSON.parse(await readFile(new URL("../dist/server/wrangler.json", import.meta.url), "utf8"));
-  assert.deepEqual(config.durable_objects?.bindings, [{ name: "PAIR_ROOMS", class_name: "PairRoom" }]);
-  assert.deepEqual(config.migrations, [{ tag: "v1", new_sqlite_classes: ["PairRoom"] }]);
+  assert.deepEqual(config.durable_objects?.bindings, [
+    { name: "PAIR_ROOMS", class_name: "PairRoom" },
+    { name: "GROUP_ROOMS", class_name: "GroupRoom" },
+  ]);
+  assert.deepEqual(config.migrations, [
+    { tag: "v1", new_sqlite_classes: ["PairRoom"] },
+    { tag: "v2", new_sqlite_classes: ["GroupRoom"] },
+  ]);
 });

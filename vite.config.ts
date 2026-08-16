@@ -8,9 +8,15 @@ const localBindingConfig = {
   main: "./worker/index.ts",
   compatibility_flags: ["nodejs_compat"],
   durable_objects: {
-    bindings: [{ name: "PAIR_ROOMS", class_name: "PairRoom" }],
+    bindings: [
+      { name: "PAIR_ROOMS", class_name: "PairRoom" },
+      { name: "GROUP_ROOMS", class_name: "GroupRoom" },
+    ],
   },
-  migrations: [{ tag: "v1", new_sqlite_classes: ["PairRoom"] }],
+  migrations: [
+    { tag: "v1", new_sqlite_classes: ["PairRoom"] },
+    { tag: "v2", new_sqlite_classes: ["GroupRoom"] },
+  ],
 };
 
 export default defineConfig(async () => {

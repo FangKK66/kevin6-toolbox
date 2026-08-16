@@ -28,10 +28,18 @@ const tools = [
   {
     number: "04",
     href: "/toolbox/lan-transfer/",
-    title: "LAN Transfer",
-    description: "Send text and files directly between two browsers using an encrypted peer connection.",
+    title: "Pair Transfer",
+    description: "Send text and files directly between two browsers using a private encrypted connection.",
     status: "LAB",
     tone: "blue",
+  },
+  {
+    number: "05",
+    href: "/toolbox/group-transfer/",
+    title: "Group Transfer",
+    description: "Connect up to four browsers, choose recipients and transfer text or files directly.",
+    status: "LAB",
+    tone: "acid",
   },
 ];
 
@@ -44,7 +52,7 @@ export default function ToolboxHome() {
           <h1>Pick a tool.<br /><em>Get it done.</em></h1>
         </div>
         <p className="hero-note">
-          Four focused tools. No accounts, no uploads, no clutter. Your files stay on your device.
+          Five focused tools. No accounts, no uploads, no clutter. Your files stay private by default.
         </p>
       </section>
 
