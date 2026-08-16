@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
-import type { ScanCorners } from "../lib/scan-types";
+import type { ScanCorners, ScanPage } from "../lib/scan-types";
 
 const LABELS = ["Top left", "Top right", "Bottom right", "Bottom left"];
 const MAGNIFIER_ZOOM = 3;
@@ -15,15 +15,22 @@ type MagnifierState = {
   top: number;
 };
 
-export function CornerEditor({ src, name, corners, disabled, onChange }: {
+export function CornerEditor({ src, name, width, height, rotation, corners, disabled, onChange }: {
   src: string;
   name: string;
+  width: number;
+  height: number;
+  rotation: ScanPage["rotation"];
   corners: ScanCorners;
   disabled?: boolean;
   onChange: (corners: ScanCorners) => void;
 }) {
   const editorRef = useRef<HTMLDivElement>(null);
   const [magnifier, setMagnifier] = useState<MagnifierState | null>(null);
+  const quarterTurn = rotation === 90 || rotation === 270;
+  const displayWidth = quarterTurn ? height : width;
+  const displayHeight = quarterTurn ? width : height;
+  const displayRatio = displayWidth / displayHeight;
 
   function showMagnifier(point: { x: number; y: number }) {
     const bounds = editorRef.current?.getBoundingClientRect();
@@ -72,7 +79,20 @@ export function CornerEditor({ src, name, corners, disabled, onChange }: {
     event.preventDefault();
   }
 
-  const magnifiedImageStyle = magnifier ? {
+  const editorStyle = {
+    width: `min(100%, ${64 * displayRatio}vh)`,
+    aspectRatio: `${displayWidth} / ${displayHeight}`,
+  } satisfies CSSProperties;
+
+  const sourceImageStyle = {
+    width: quarterTurn ? `${width / height * 100}%` : "100%",
+    height: quarterTurn ? `${height / width * 100}%` : "100%",
+    maxWidth: "none",
+    maxHeight: "none",
+    transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+  } satisfies CSSProperties;
+
+  const magnifiedPlaneStyle = magnifier ? {
     width: magnifier.editorWidth * MAGNIFIER_ZOOM,
     height: magnifier.editorHeight * MAGNIFIER_ZOOM,
     left: magnifier.size / 2 - magnifier.point.x * magnifier.editorWidth * MAGNIFIER_ZOOM,
@@ -80,9 +100,9 @@ export function CornerEditor({ src, name, corners, disabled, onChange }: {
   } satisfies CSSProperties : undefined;
 
   return (
-    <div className="corner-editor" ref={editorRef}>
+    <div className="corner-editor" ref={editorRef} style={editorStyle}>
       {/* The original photo remains visible while the crop geometry is edited. */}
-      <img src={src} alt={`${name} crop preview`} draggable={false} />
+      <img className="corner-source-image" src={src} alt={`${name} crop preview`} draggable={false} style={sourceImageStyle} />
       <svg className="corner-outline" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
         <polygon points={corners.map((point) => `${point.x * 100},${point.y * 100}`).join(" ")} />
         {corners.map((point, index) => index < 3 ? <line key={index} x1={point.x * 100} y1={point.y * 100} x2={corners[index + 1].x * 100} y2={corners[index + 1].y * 100} /> : null)}
@@ -105,7 +125,7 @@ export function CornerEditor({ src, name, corners, disabled, onChange }: {
         ><span>{index + 1}</span></button>
       ))}
       {magnifier && <div className="corner-magnifier" aria-hidden="true" style={{ width: magnifier.size, height: magnifier.size, left: magnifier.left, top: magnifier.top }}>
-        <img src={src} alt="" draggable={false} style={magnifiedImageStyle} />
+        <div className="corner-magnifier-plane" style={magnifiedPlaneStyle}><img className="corner-source-image" src={src} alt="" draggable={false} style={sourceImageStyle} /></div>
       </div>}
     </div>
   );

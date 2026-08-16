@@ -5,7 +5,7 @@ import { zipSync } from "fflate";
 import { ImageClaritySelector, qualityForClarity, type ImageClarity } from "../components/ImageClarity";
 import { MobileSaveActions } from "../components/MobileSaveActions";
 import { PrivacyNote } from "../components/ToolShell";
-import { canUseNativeFileShare, canvasToBlob, containSize, downloadBlob, formatBytes, loadBitmap, type PreparedImage } from "../lib/image";
+import { canUseNativeFileShare, canvasToBlob, containSize, downloadBlob, formatBytes, loadBitmap, needsDecodedPreview, type PreparedImage } from "../lib/image";
 import { DEFAULT_CORNERS, type DetectionResult, type ProcessResult, type ProcessSettings, type ScanCorners, type ScanMode, type ScanPage } from "../lib/scan-types";
 import { CornerEditor } from "./CornerEditor";
 
@@ -26,6 +26,38 @@ const WORKER_TIMEOUT_MS = 45_000;
 
 function baseName(name: string) {
   return name.replace(/\.[^/.]+$/, "") || "scan";
+}
+
+function rotatePointForDisplay(point: ScanCorners[number], rotation: ScanPage["rotation"]) {
+  if (rotation === 90) return { x: 1 - point.y, y: point.x };
+  if (rotation === 180) return { x: 1 - point.x, y: 1 - point.y };
+  if (rotation === 270) return { x: point.y, y: 1 - point.x };
+  return { ...point };
+}
+
+function restorePointFromDisplay(point: ScanCorners[number], rotation: ScanPage["rotation"]) {
+  if (rotation === 90) return { x: point.y, y: 1 - point.x };
+  if (rotation === 180) return { x: 1 - point.x, y: 1 - point.y };
+  if (rotation === 270) return { x: 1 - point.y, y: point.x };
+  return { ...point };
+}
+
+function cornersForDisplay(corners: ScanCorners, rotation: ScanPage["rotation"]) {
+  const turns = rotation / 90;
+  return [0, 1, 2, 3].map((displayIndex) => {
+    const sourceIndex = (displayIndex - turns + 4) % 4;
+    return rotatePointForDisplay(corners[sourceIndex], rotation);
+  }) as ScanCorners;
+}
+
+function cornersFromDisplay(corners: ScanCorners, rotation: ScanPage["rotation"]) {
+  const turns = rotation / 90;
+  const restored = DEFAULT_CORNERS.map((point) => ({ ...point })) as ScanCorners;
+  corners.forEach((point, displayIndex) => {
+    const sourceIndex = (displayIndex - turns + 4) % 4;
+    restored[sourceIndex] = restorePointFromDisplay(point, rotation);
+  });
+  return restored;
 }
 
 function pageSettings(page: ScanPage): ProcessSettings {
@@ -58,6 +90,16 @@ async function resultToBlob(result: ProcessResult, type: "image/jpeg" | "image/p
   if (!context) throw new Error("Canvas is unavailable in this browser.");
   context.putImageData(new ImageData(result.pixels, result.width, result.height), 0, 0);
   return canvasToBlob(canvas, type, quality);
+}
+
+async function decodedPreviewUrl(image: ImageData) {
+  const canvas = document.createElement("canvas");
+  canvas.width = image.width;
+  canvas.height = image.height;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Canvas is unavailable in this browser.");
+  context.putImageData(image, 0, 0);
+  return URL.createObjectURL(await canvasToBlob(canvas, "image/png"));
 }
 
 function ProcessedPreview({ result }: { result: ProcessResult | null }) {
@@ -185,9 +227,14 @@ export function DocumentScanner() {
     for (const file of candidates) {
       if (file.size > MAX_FILE_BYTES) { setStatus(`${file.name} is larger than 30 MB and was skipped.`); continue; }
       const id = crypto.randomUUID();
-      const objectUrl = URL.createObjectURL(file);
+      let objectUrl = URL.createObjectURL(file);
       try {
         const { image, sourceWidth, sourceHeight } = await bitmapToImageData(file, ANALYSIS_EDGE);
+        if (needsDecodedPreview(file)) {
+          const previewUrl = await decodedPreviewUrl(image);
+          URL.revokeObjectURL(objectUrl);
+          objectUrl = previewUrl;
+        }
         if (sourceWidth * sourceHeight > 40_000_000) setStatus(`${file.name} is very large; export will be resized for stability.`);
         cacheRef.current.set(id, image);
         const page: ScanPage = {
@@ -405,8 +452,8 @@ export function DocumentScanner() {
           <div className="field"><label>Scan look</label><div className="scan-mode-tabs">
             {(["color", "grayscale", "black-white"] as ScanMode[]).map((mode) => <button key={mode} className={`button ${activePage?.mode === mode ? "active" : ""}`} disabled={!activePage || busy} onClick={() => updateActive({ mode })}>{mode === "black-white" ? "B&W" : mode[0].toUpperCase() + mode.slice(1)}</button>)}
           </div></div>
-          <div className="field"><label>Brightness · {activePage?.brightness ?? 0}</label><input type="range" min="-50" max="50" value={activePage?.brightness ?? 0} disabled={!activePage || busy} onChange={(event) => updateActive({ brightness: Number(event.target.value) })} /></div>
-          <div className="field"><label>Contrast · {activePage?.contrast ?? 100}%</label><input type="range" min="60" max="150" value={activePage?.contrast ?? 100} disabled={!activePage || busy} onChange={(event) => updateActive({ contrast: Number(event.target.value) })} /></div>
+          <div className="field"><div className="range-label"><label>Brightness · {activePage?.brightness ?? 0}</label><button type="button" disabled={!activePage || busy || activePage.brightness === 0} onClick={() => updateActive({ brightness: 0 })}>Reset</button></div><input type="range" min="-50" max="50" value={activePage?.brightness ?? 0} disabled={!activePage || busy} onChange={(event) => updateActive({ brightness: Number(event.target.value) })} /></div>
+          <div className="field"><div className="range-label"><label>Contrast · {activePage?.contrast ?? 108}%</label><button type="button" disabled={!activePage || busy || activePage.contrast === 108} onClick={() => updateActive({ contrast: 108 })}>Reset</button></div><input type="range" min="60" max="150" value={activePage?.contrast ?? 108} disabled={!activePage || busy} onChange={(event) => updateActive({ contrast: Number(event.target.value) })} /></div>
           {activePage?.mode === "black-white" && <div className="field"><label>B&W threshold · {activePage.threshold}</label><input type="range" min="0" max="100" value={activePage.threshold} disabled={busy} onChange={(event) => updateActive({ threshold: Number(event.target.value) })} /></div>}
           <button className="button" disabled={!activePage || pages.length < 2 || busy} onClick={applyLookToAll}>Apply look to all pages</button>
         </div></div>
@@ -431,7 +478,7 @@ export function DocumentScanner() {
           <div className="scanner-view-tabs" role="tablist" aria-label="Preview mode"><button role="tab" aria-selected={previewMode === "crop"} className={`button ${previewMode === "crop" ? "active" : ""}`} onClick={() => setPreviewMode("crop")}>Crop</button><button role="tab" aria-selected={previewMode === "scan"} className={`button ${previewMode === "scan" ? "active" : ""}`} onClick={() => setPreviewMode("scan")} disabled={!activePage || activePage.status === "detecting"}>Preview</button></div>
           <div className="preview-stage scanner-stage">
             {!activePage ? <div className="empty-state"><strong>Document preview</strong><span>Add one or more photos to begin</span></div> : previewMode === "crop" ?
-              <CornerEditor src={activePage.objectUrl} name={activePage.name} corners={activePage.corners} disabled={busy} onChange={(corners) => updateActive({ corners, status: "ready" })} /> :
+              <CornerEditor src={activePage.objectUrl} name={activePage.name} width={activePage.width} height={activePage.height} rotation={activePage.rotation} corners={cornersForDisplay(activePage.corners, activePage.rotation)} disabled={busy} onChange={(corners) => updateActive({ corners: cornersFromDisplay(corners, activePage.rotation), status: "ready" })} /> :
               previewing ? <div className="empty-state scanner-processing"><strong>Processing locally…</strong><span>The first preview may take a moment</span><ScannerProgress label="Creating scan preview" /></div> : <ProcessedPreview result={processedPreview} />}
           </div>
           {activePage?.status === "detecting" && <ScannerProgress label="Detecting document edges" />}

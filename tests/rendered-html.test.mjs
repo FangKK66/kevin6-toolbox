@@ -99,6 +99,8 @@ test("document scanner keeps processing local and includes batch exports", async
   assert.match(source, /"\.gif"/);
   assert.match(source, /"\.dng"/);
   assert.match(source, /Camera RAW/);
+  assert.match(source, /needsDecodedPreview/);
+  assert.match(source, /decodedPreviewUrl/);
 });
 
 test("document scanner provides automatic and manual four-corner correction", async () => {
@@ -111,6 +113,9 @@ test("document scanner provides automatic and manual four-corner correction", as
   assert.match(editor, /corner-handle/);
   assert.match(editor, /corner-magnifier/);
   assert.match(editor, /MAGNIFIER_ZOOM/);
+  assert.match(editor, /rotation/);
+  assert.match(scanner, /cornersForDisplay/);
+  assert.match(scanner, /cornersFromDisplay/);
   assert.match(editor, /ArrowLeft/);
   assert.match(scanner, /WORKER_TIMEOUT_MS/);
   assert.match(scanner, /role="progressbar"/);
