@@ -11,12 +11,14 @@ import { CornerEditor } from "./CornerEditor";
 
 type WorkerReply = { id: number; ok: true; result: unknown } | { id: number; ok: false; error: string };
 type PdfPageSize = "auto" | "a4" | "letter";
+type ScannerProgressState = { label: string; value?: number };
 
 const ACCEPTED_IMAGES = "image/png,image/jpeg,image/webp,image/heic,image/heif,image/bmp,image/tiff,.heic,.heif,.bmp,.tif,.tiff";
 const MAX_PAGES = 30;
 const MAX_FILE_BYTES = 30 * 1024 * 1024;
 const ANALYSIS_EDGE = 1500;
 const EXPORT_EDGE = 3000;
+const WORKER_TIMEOUT_MS = 45_000;
 
 function baseName(name: string) {
   return name.replace(/\.[^/.]+$/, "") || "scan";
@@ -66,6 +68,17 @@ function ProcessedPreview({ result }: { result: ProcessResult | null }) {
   return result ? <canvas ref={canvasRef} aria-label="Processed scan preview" /> : null;
 }
 
+function ScannerProgress({ label, value }: ScannerProgressState) {
+  const determinate = typeof value === "number";
+  const percent = determinate ? Math.max(0, Math.min(100, Math.round(value))) : undefined;
+  return <div className="scanner-progress-wrap">
+    <div className="scanner-progress-copy"><span>{label}</span>{determinate && <span>{percent}%</span>}</div>
+    <div className={`scanner-progress ${determinate ? "" : "indeterminate"}`} role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}>
+      <span style={determinate ? { width: `${percent}%` } : undefined} />
+    </div>
+  </div>;
+}
+
 export function DocumentScanner() {
   const [pages, setPages] = useState<ScanPage[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -75,6 +88,7 @@ export function DocumentScanner() {
   const [dragging, setDragging] = useState(false);
   const [status, setStatus] = useState("Choose photos to begin");
   const [busy, setBusy] = useState(false);
+  const [exportProgress, setExportProgress] = useState<ScannerProgressState | null>(null);
   const [outputFormat, setOutputFormat] = useState<"image/jpeg" | "image/png">("image/jpeg");
   const [clarity, setClarity] = useState<ImageClarity>("maximum");
   const [pdfPageSize, setPdfPageSize] = useState<PdfPageSize>("auto");
@@ -115,7 +129,19 @@ export function DocumentScanner() {
   const workerCall = useCallback(<T,>(message: Record<string, unknown>): Promise<T> => {
     const id = ++requestIdRef.current;
     return new Promise<T>((resolve, reject) => {
-      pendingRef.current.set(id, { resolve: (value) => resolve(value as T), reject });
+      const timeout = window.setTimeout(() => {
+        if (!pendingRef.current.delete(id)) return;
+        const error = new Error("The local scanner engine could not start. Reload the page and try again.");
+        for (const pending of pendingRef.current.values()) pending.reject(error);
+        pendingRef.current.clear();
+        workerRef.current?.terminate();
+        workerRef.current = null;
+        reject(error);
+      }, WORKER_TIMEOUT_MS);
+      pendingRef.current.set(id, {
+        resolve: (value) => { window.clearTimeout(timeout); resolve(value as T); },
+        reject: (reason) => { window.clearTimeout(timeout); reject(reason); },
+      });
       ensureWorker().postMessage({ ...message, id });
     });
   }, [ensureWorker]);
@@ -210,8 +236,12 @@ export function DocumentScanner() {
     if (!image) return;
     updateActive({ status: "detecting" });
     setStatus("Finding the document edges…");
-    const result = await detectPage(activePage.id, image).catch(() => null);
-    setStatus(result?.confidence ? "Corners detected · adjust them if needed" : "Edges were unclear · adjust the corners manually");
+    try {
+      const result = await detectPage(activePage.id, image);
+      setStatus(result.confidence ? "Corners detected · adjust them if needed" : "Edges were unclear · adjust the corners manually");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Corner detection failed.");
+    }
   }
 
   function deletePage(page: ScanPage) {
@@ -250,8 +280,10 @@ export function DocumentScanner() {
   async function exportCurrent() {
     if (!activePage || busy) return;
     setBusy(true); setPrepared(null); setStatus("Creating full-resolution scan…");
+    setExportProgress({ label: "Processing current image" });
     try {
       const result = await processForExport(activePage);
+      setExportProgress({ label: "Encoding current image", value: 85 });
       const blob = await resultToBlob(result, outputFormat, qualityForClarity(clarity));
       const filename = `${baseName(activePage.name)}-scanned.${outputFormat === "image/png" ? "png" : "jpg"}`;
       const preparedResult = { blob, filename };
@@ -259,24 +291,28 @@ export function DocumentScanner() {
       else { downloadBlob(blob, filename); setStatus(`Image downloaded · ${formatBytes(blob.size)}`); }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "The image could not be exported.");
-    } finally { setBusy(false); }
+    } finally { setBusy(false); setExportProgress(null); }
   }
 
   async function exportZip() {
     if (!pages.length || busy) return;
     setBusy(true); setPrepared(null); cancelRef.current = false;
+    setExportProgress({ label: `Processing page 1 of ${pages.length}`, value: 0 });
     try {
       const entries: Record<string, Uint8Array> = {};
       for (let index = 0; index < pages.length; index++) {
         if (cancelRef.current) throw new Error("Export cancelled.");
         setStatus(`Creating image ${index + 1} of ${pages.length}…`);
+        setExportProgress({ label: `Processing page ${index + 1} of ${pages.length}`, value: index / pages.length * 90 });
         const result = await processForExport(pages[index]);
         const type = outputFormat;
         const blob = await resultToBlob(result, type, qualityForClarity(clarity));
         const extension = type === "image/png" ? "png" : "jpg";
         entries[`page-${String(index + 1).padStart(3, "0")}-${baseName(pages[index].name)}.${extension}`] = new Uint8Array(await blob.arrayBuffer());
+        setExportProgress({ label: `Processed page ${index + 1} of ${pages.length}`, value: (index + 1) / pages.length * 90 });
       }
       setStatus("Packaging images…");
+      setExportProgress({ label: "Packaging images", value: 95 });
       const bytes = zipSync(entries, { level: 0 });
       const buffer = new Uint8Array(bytes).buffer;
       const blob = new Blob([buffer], { type: "application/zip" });
@@ -284,12 +320,13 @@ export function DocumentScanner() {
       setStatus(`ZIP downloaded · ${formatBytes(blob.size)}`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "The ZIP could not be created.");
-    } finally { setBusy(false); cancelRef.current = false; }
+    } finally { setBusy(false); setExportProgress(null); cancelRef.current = false; }
   }
 
   async function exportPdf() {
     if (!pages.length || busy) return;
     setBusy(true); setPrepared(null); cancelRef.current = false;
+    setExportProgress({ label: `Processing PDF page 1 of ${pages.length}`, value: 0 });
     try {
       const { PDFDocument } = await import("pdf-lib");
       const pdf = await PDFDocument.create();
@@ -298,6 +335,7 @@ export function DocumentScanner() {
       for (let index = 0; index < pages.length; index++) {
         if (cancelRef.current) throw new Error("Export cancelled.");
         setStatus(`Creating PDF page ${index + 1} of ${pages.length}…`);
+        setExportProgress({ label: `Processing PDF page ${index + 1} of ${pages.length}`, value: index / pages.length * 90 });
         const result = await processForExport(pages[index]);
         const blob = await resultToBlob(result, "image/jpeg", qualityForClarity(clarity));
         const embedded = await pdf.embedJpg(await blob.arrayBuffer());
@@ -313,15 +351,17 @@ export function DocumentScanner() {
         const drawnWidth = result.width * scale;
         const drawnHeight = result.height * scale;
         page.drawImage(embedded, { x: (pageWidth - drawnWidth) / 2, y: (pageHeight - drawnHeight) / 2, width: drawnWidth, height: drawnHeight });
+        setExportProgress({ label: `Processed PDF page ${index + 1} of ${pages.length}`, value: (index + 1) / pages.length * 90 });
       }
       setStatus("Finishing PDF…");
+      setExportProgress({ label: "Finishing PDF", value: 95 });
       const saved = await pdf.save({ useObjectStreams: true });
       const blob = new Blob([new Uint8Array(saved).buffer], { type: "application/pdf" });
       downloadBlob(blob, "scanned-document.pdf");
       setStatus(`PDF downloaded · ${pages.length} pages · ${formatBytes(blob.size)}`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "The PDF could not be created.");
-    } finally { setBusy(false); cancelRef.current = false; }
+    } finally { setBusy(false); setExportProgress(null); cancelRef.current = false; }
   }
 
   function fileInput(event: ChangeEvent<HTMLInputElement>) {
@@ -353,7 +393,7 @@ export function DocumentScanner() {
 
         <div className="step"><span className="step-number">02</span><div>
           <div className="field"><label>Page correction</label><div className="button-row">
-            <button className="button" disabled={!activePage || busy} onClick={autoDetect}>Auto detect</button>
+            <button className="button" disabled={!activePage || busy || activePage.status === "detecting"} onClick={autoDetect}>{activePage?.status === "detecting" ? "Detecting…" : "Auto detect"}</button>
             <button className="button" disabled={!activePage || busy} onClick={() => updateActive({ corners: DEFAULT_CORNERS.map((point) => ({ ...point })) as ScanCorners, status: "needs-review" })}>Use full image</button>
             <button className="button" disabled={!activePage || busy} onClick={() => updateActive({ rotation: (((activePage?.rotation ?? 0) + 90) % 360) as ScanPage["rotation"] })}>Rotate 90°</button>
           </div></div>
@@ -374,6 +414,7 @@ export function DocumentScanner() {
           <div className="field"><label>PDF page size</label><select value={pdfPageSize} disabled={busy} onChange={(event) => setPdfPageSize(event.target.value as PdfPageSize)}><option value="auto">Auto · match document</option><option value="a4">A4</option><option value="letter">Letter</option></select></div>
           <button className="button primary" disabled={!activePage || busy} onClick={exportCurrent}>{busy ? "Processing…" : "Download current image"}</button>
           <div className="button-row scanner-export-row"><button className="button" disabled={!pages.length || busy} onClick={exportZip}>All images · ZIP</button><button className="button" disabled={!pages.length || busy} onClick={exportPdf}>Create PDF</button></div>
+          {exportProgress && <ScannerProgress {...exportProgress} />}
           {busy && <button className="button scanner-cancel" onClick={() => { cancelRef.current = true; setStatus("Cancelling after this page…"); }}>Cancel export</button>}
           {prepared && <MobileSaveActions result={prepared} onStatus={setStatus} />}
         </div></div>
@@ -381,13 +422,14 @@ export function DocumentScanner() {
 
       <div className="scanner-main">
         <div className="preview-panel scanner-preview">
-          <div className="panel-title"><span>{previewMode === "crop" ? "Adjust corners" : "Scan preview"}</span><span>{activePage ? `${activeIndex + 1}/${pages.length}` : "WAITING"}</span></div>
-          <div className="scanner-view-tabs" role="tablist" aria-label="Preview mode"><button role="tab" aria-selected={previewMode === "crop"} className={`button ${previewMode === "crop" ? "active" : ""}`} onClick={() => setPreviewMode("crop")}>Crop</button><button role="tab" aria-selected={previewMode === "scan"} className={`button ${previewMode === "scan" ? "active" : ""}`} onClick={() => setPreviewMode("scan")} disabled={!activePage}>Scan</button></div>
+          <div className="panel-title"><span>{previewMode === "crop" ? "Adjust corners" : "Preview result"}</span><span>{activePage ? `${activeIndex + 1}/${pages.length}` : "WAITING"}</span></div>
+          <div className="scanner-view-tabs" role="tablist" aria-label="Preview mode"><button role="tab" aria-selected={previewMode === "crop"} className={`button ${previewMode === "crop" ? "active" : ""}`} onClick={() => setPreviewMode("crop")}>Crop</button><button role="tab" aria-selected={previewMode === "scan"} className={`button ${previewMode === "scan" ? "active" : ""}`} onClick={() => setPreviewMode("scan")} disabled={!activePage || activePage.status === "detecting"}>Preview</button></div>
           <div className="preview-stage scanner-stage">
             {!activePage ? <div className="empty-state"><strong>Document preview</strong><span>Add one or more photos to begin</span></div> : previewMode === "crop" ?
               <CornerEditor src={activePage.objectUrl} name={activePage.name} corners={activePage.corners} disabled={busy} onChange={(corners) => updateActive({ corners, status: "ready" })} /> :
-              previewing ? <div className="empty-state"><strong>Processing locally…</strong><span>The first preview may take a moment</span></div> : <ProcessedPreview result={processedPreview} />}
+              previewing ? <div className="empty-state scanner-processing"><strong>Processing locally…</strong><span>The first preview may take a moment</span><ScannerProgress label="Creating scan preview" /></div> : <ProcessedPreview result={processedPreview} />}
           </div>
+          {activePage?.status === "detecting" && <ScannerProgress label="Detecting document edges" />}
           <div className="preview-meta"><span>{status}</span><span>{activePage ? `${activePage.width} × ${activePage.height}` : "Original files remain untouched"}</span></div>
         </div>
 

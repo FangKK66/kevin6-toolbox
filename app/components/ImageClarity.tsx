@@ -3,9 +3,9 @@
 export type ImageClarity = "maximum" | "high" | "standard";
 
 const OPTIONS: Array<{ value: ImageClarity; label: string; quality: number }> = [
-  { value: "maximum", label: "Best quality", quality: 1 },
-  { value: "high", label: "Balanced", quality: 0.9 },
-  { value: "standard", label: "Small file", quality: 0.76 },
+  { value: "maximum", label: "High", quality: 1 },
+  { value: "high", label: "Mid", quality: 0.9 },
+  { value: "standard", label: "Low", quality: 0.76 },
 ];
 
 export function qualityForClarity(clarity: ImageClarity) {

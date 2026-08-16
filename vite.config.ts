@@ -7,6 +7,13 @@ const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 const localBindingConfig = {
   main: "./worker/index.ts",
   compatibility_flags: ["nodejs_compat"],
+  // Vinext resolves files from public/ through the Worker when basePath is
+  // enabled. Keep the generated asset binding available in production so
+  // those responses contain the real file instead of an empty signal.
+  assets: {
+    binding: "ASSETS",
+    not_found_handling: "none" as const,
+  },
   durable_objects: {
     bindings: [
       { name: "PAIR_ROOMS", class_name: "PairRoom" },

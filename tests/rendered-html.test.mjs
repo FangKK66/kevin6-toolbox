@@ -76,6 +76,8 @@ test("Group Transfer implements a four-device targeted mesh", async () => {
 
 test("deployment config includes the SQLite pairing room", async () => {
   const config = JSON.parse(await readFile(new URL("../dist/server/wrangler.json", import.meta.url), "utf8"));
+  assert.equal(config.assets?.binding, "ASSETS");
+  assert.equal(config.assets?.not_found_handling, "none");
   assert.deepEqual(config.durable_objects?.bindings, [
     { name: "PAIR_ROOMS", class_name: "PairRoom" },
     { name: "GROUP_ROOMS", class_name: "GroupRoom" },
@@ -96,6 +98,7 @@ test("document scanner keeps processing local and includes batch exports", async
 });
 
 test("document scanner provides automatic and manual four-corner correction", async () => {
+  const scanner = await readFile(new URL("../app/document-scanner/DocumentScanner.tsx", import.meta.url), "utf8");
   const worker = await readFile(new URL("../app/document-scanner/scanner.worker.ts", import.meta.url), "utf8");
   const editor = await readFile(new URL("../app/document-scanner/CornerEditor.tsx", import.meta.url), "utf8");
   assert.match(worker, /findContours/);
@@ -103,6 +106,11 @@ test("document scanner provides automatic and manual four-corner correction", as
   assert.match(worker, /adaptiveThreshold/);
   assert.match(editor, /corner-handle/);
   assert.match(editor, /ArrowLeft/);
+  assert.match(scanner, /WORKER_TIMEOUT_MS/);
+  assert.match(scanner, /role="progressbar"/);
+  assert.match(scanner, /Processing PDF page/);
+  assert.match(scanner, />Preview<\/button>/);
+  assert.doesNotMatch(scanner, />Scan<\/button>/);
 });
 
 test("document scanner build emits its local OpenCV worker assets", async () => {
@@ -114,9 +122,9 @@ test("document scanner build emits its local OpenCV worker assets", async () => 
 
 test("all image quality controls use the shared three-option clarity selector", async () => {
   const selector = await readFile(new URL("../app/components/ImageClarity.tsx", import.meta.url), "utf8");
-  assert.match(selector, /Best quality/);
-  assert.match(selector, /Balanced/);
-  assert.match(selector, /Small file/);
+  assert.match(selector, /High/);
+  assert.match(selector, /Mid/);
+  assert.match(selector, /Low/);
   assert.match(selector, /useState<ImageClarity>|value: "maximum"/);
   for (const path of [
     "../app/image-converter/ImageConverter.tsx",
