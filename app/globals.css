@@ -95,6 +95,12 @@ input[type="color"] { width: 100%; height: 40px; border: 1px solid var(--line); 
 .privacy-note span { color: var(--acid); margin-right: 6px; }
 .status-box { border: 1px solid var(--line); border-radius: 10px; padding: 13px; color: #a6a89e; font-size: 11px; line-height: 1.5; }
 .status-box.good { border-color: rgba(217,255,87,.35); color: var(--acid); }
+.status-box.error { border-color: rgba(255,112,72,.55); background: rgba(255,112,72,.07); color: #ff9a7e; }
+.connection-error { margin-top: 9px; border: 1px solid rgba(255,112,72,.32); border-radius: 10px; background: rgba(255,112,72,.045); padding: 13px; }
+.connection-error strong { display: block; color: #ff9a7e; font-size: 11px; }
+.connection-error p { margin: 7px 0 11px; color: #c1b6ae; font-size: 11px; line-height: 1.55; }
+.connection-diagnostic { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 7px 12px; border-top: 1px solid rgba(255,112,72,.18); padding-top: 9px; color: #918983; font: 8px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .05em; text-transform: uppercase; }
+.connection-diagnostic code { color: #bd8c7e; font: inherit; overflow-wrap: anywhere; }
 .canvas-wrap { width: 100%; height: 100%; display: grid; place-items: center; }
 .canvas-wrap canvas { touch-action: none; cursor: grab; }
 .canvas-wrap canvas:active { cursor: grabbing; }

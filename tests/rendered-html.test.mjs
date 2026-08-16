@@ -47,6 +47,14 @@ test("LAN transfer renders the four-emoji pairing flow", async () => {
   assert.match(html, /Join room/i);
 });
 
+test("LAN transfer includes a staged connection diagnostic", async () => {
+  const source = await readFile(new URL("../app/lan-transfer/LanTransfer.tsx", import.meta.url), "utf8");
+  assert.match(source, /DIRECT_CONNECTION_TIMEOUT/);
+  assert.match(source, /ICE_CONNECTION_FAILED/);
+  assert.match(source, /Failed at:/);
+  assert.match(source, /Public Wi-Fi client isolation/i);
+});
+
 test("deployment config includes the SQLite pairing room", async () => {
   const config = JSON.parse(await readFile(new URL("../dist/server/wrangler.json", import.meta.url), "utf8"));
   assert.deepEqual(config.durable_objects?.bindings, [{ name: "PAIR_ROOMS", class_name: "PairRoom" }]);

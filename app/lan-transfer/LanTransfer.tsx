@@ -8,6 +8,15 @@ type LogItem = { id: number; text: string; remote?: boolean };
 type IncomingFile = { name: string; type: string; size: number; chunks: ArrayBuffer[]; received: number };
 type PairRole = "host" | "guest";
 type PairMode = "idle" | "hosting" | "joining";
+type ConnectionError = {
+  title: string;
+  detail: string;
+  code: string;
+  stage: "Pairing service" | "Direct device connection";
+};
+
+const DIRECT_CONNECTION_TIMEOUT_MS = 15_000;
+const DISCONNECTED_GRACE_MS = 6_000;
 
 const EMOJIS = Array.from("🐼🦊🐸🐙🦄🐝🦋🌵🍋🍉🍒🥨🍕🚀🚲🎸🎧🎲⚽🌈⭐🔥💎🎈");
 
@@ -43,6 +52,9 @@ export function LanTransfer() {
   const negotiatingRef = useRef(false);
   const incomingRef = useRef<IncomingFile | null>(null);
   const autoJoinedRef = useRef(false);
+  const directTimeoutRef = useRef<number | null>(null);
+  const disconnectedTimeoutRef = useRef<number | null>(null);
+  const connectionErrorRef = useRef<ConnectionError | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [roomCode, setRoomCode] = useState<string[]>([]);
   const [roomUrl, setRoomUrl] = useState("");
@@ -53,6 +65,7 @@ export function LanTransfer() {
   const [status, setStatus] = useState("Create a room or enter four emojis");
   const [connected, setConnected] = useState(false);
   const [logs, setLogs] = useState<LogItem[]>([]);
+  const [connectionError, setConnectionError] = useState<ConnectionError | null>(null);
 
   useEffect(() => {
     const code = new URLSearchParams(window.location.search).get("room") ?? "";
@@ -62,6 +75,7 @@ export function LanTransfer() {
       connectRoom(code, "guest");
     }
     return () => {
+      clearConnectionTimers();
       socketRef.current?.close();
       peerRef.current?.close();
     };
@@ -82,6 +96,35 @@ export function LanTransfer() {
 
   const log = (text: string, remote = false) => setLogs((items) => [...items, { id: Date.now() + Math.random(), text, remote }]);
 
+  function clearConnectionTimers() {
+    if (directTimeoutRef.current !== null) window.clearTimeout(directTimeoutRef.current);
+    if (disconnectedTimeoutRef.current !== null) window.clearTimeout(disconnectedTimeoutRef.current);
+    directTimeoutRef.current = null;
+    disconnectedTimeoutRef.current = null;
+  }
+
+  function reportConnectionError(error: ConnectionError) {
+    clearConnectionTimers();
+    setConnected(false);
+    connectionErrorRef.current = error;
+    setConnectionError(error);
+    setStatus(error.title);
+  }
+
+  function watchDirectConnection() {
+    if (directTimeoutRef.current !== null) window.clearTimeout(directTimeoutRef.current);
+    directTimeoutRef.current = window.setTimeout(() => {
+      if (channelRef.current?.readyState === "open") return;
+      const iceState = peerRef.current?.iceConnectionState ?? "unknown";
+      reportConnectionError({
+        title: "The devices could not connect directly",
+        detail: "The pairing service found both devices, but this network did not allow a peer-to-peer path. Public Wi-Fi client isolation, a firewall, or blocked UDP traffic is the most likely cause. Try a personal hotspot or a trusted private Wi-Fi network.",
+        code: `DIRECT_CONNECTION_TIMEOUT (ICE: ${iceState})`,
+        stage: "Direct device connection",
+      });
+    }, DIRECT_CONNECTION_TIMEOUT_MS);
+  }
+
   function makePeer() {
     peerRef.current?.close();
     negotiatingRef.current = false;
@@ -89,8 +132,35 @@ export function LanTransfer() {
     peerRef.current = peer;
     peer.addEventListener("connectionstatechange", () => {
       const state = peer.connectionState;
-      setStatus(state === "connected" ? "Direct connection ready" : `Direct connection: ${state}`);
-      setConnected(state === "connected");
+      if (state === "connected") {
+        clearConnectionTimers();
+        connectionErrorRef.current = null;
+        setConnectionError(null);
+        setStatus("Direct connection ready");
+        setConnected(true);
+      } else if (state === "failed") {
+        reportConnectionError({
+          title: "The network blocked the direct connection",
+          detail: "The room and pairing service worked, but WebRTC could not establish a path between the devices. This commonly happens when public Wi-Fi isolates connected devices. Try a personal hotspot or a trusted private Wi-Fi network.",
+          code: `ICE_CONNECTION_FAILED (ICE: ${peer.iceConnectionState})`,
+          stage: "Direct device connection",
+        });
+      } else if (state === "disconnected") {
+        setConnected(false);
+        setStatus("Direct connection interrupted — trying to recover…");
+        if (disconnectedTimeoutRef.current !== null) window.clearTimeout(disconnectedTimeoutRef.current);
+        disconnectedTimeoutRef.current = window.setTimeout(() => {
+          if (peer.connectionState !== "connected") reportConnectionError({
+            title: "The direct connection was lost",
+            detail: "The devices were connected, but the network path stopped responding. Check that both devices are still on the same network, then pair them again.",
+            code: `CONNECTION_LOST (ICE: ${peer.iceConnectionState})`,
+            stage: "Direct device connection",
+          });
+        }, DISCONNECTED_GRACE_MS);
+      } else if (state !== "closed") {
+        setStatus(`Direct connection: ${state}`);
+        setConnected(false);
+      }
     });
     peer.addEventListener("datachannel", (event) => prepareChannel(event.channel));
     return peer;
@@ -100,11 +170,18 @@ export function LanTransfer() {
     channelRef.current = channel;
     channel.binaryType = "arraybuffer";
     channel.addEventListener("open", () => {
+      clearConnectionTimers();
+      connectionErrorRef.current = null;
+      setConnectionError(null);
       setConnected(true);
       setStatus("Direct connection ready");
       log("Connected. You can now send text or files.");
     });
-    channel.addEventListener("close", () => { setConnected(false); setStatus("Direct connection closed"); });
+    channel.addEventListener("close", () => {
+      if (!roleRef.current) return;
+      setConnected(false);
+      if (!connectionErrorRef.current) setStatus("Direct connection closed");
+    });
     channel.addEventListener("message", (event) => {
       if (typeof event.data === "string") {
         const payload = JSON.parse(event.data) as { kind: string; text?: string; name?: string; type?: string; size?: number };
@@ -147,6 +224,7 @@ export function LanTransfer() {
     prepareChannel(channel);
     await peer.setLocalDescription(await peer.createOffer());
     setStatus("Connecting directly…");
+    watchDirectConnection();
     await waitForIce(peer);
     if (peer.localDescription) signal(peer.localDescription);
   }
@@ -157,6 +235,7 @@ export function LanTransfer() {
       await peer.setRemoteDescription(payload);
       await peer.setLocalDescription(await peer.createAnswer());
       setStatus("Connecting directly…");
+      watchDirectConnection();
       await waitForIce(peer);
       if (peer.localDescription) signal(peer.localDescription);
     } else if (payload.type === "answer" && roleRef.current === "host" && peerRef.current) {
@@ -166,10 +245,13 @@ export function LanTransfer() {
   }
 
   function connectRoom(code: string, role: PairRole) {
+    clearConnectionTimers();
     socketRef.current?.close();
     peerRef.current?.close();
     roleRef.current = role;
     setConnected(false);
+    connectionErrorRef.current = null;
+    setConnectionError(null);
     setMode(role === "host" ? "hosting" : "joining");
     setStatus(role === "host" ? "Room created — waiting for the other device" : "Joining emoji room…");
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -179,21 +261,55 @@ export function LanTransfer() {
       try {
         const packet = JSON.parse(event.data) as { type: string; payload?: RTCSessionDescriptionInit; message?: string };
         if (packet.type === "peer-ready") {
+          connectionErrorRef.current = null;
+          setConnectionError(null);
           setStatus("Device found — creating a direct connection…");
-          if (role === "host") void beginOffer();
+          if (role === "host") void beginOffer().catch(() => reportConnectionError({
+            title: "Could not start the direct connection",
+            detail: "The browser could not create a WebRTC connection. Check browser permissions or restrictions, then create a new room.",
+            code: "WEBRTC_NEGOTIATION_FAILED",
+            stage: "Direct device connection",
+          }));
         }
-        if (packet.type === "signal" && packet.payload) void receiveSignal(packet.payload);
-        if (packet.type === "peer-left" && channelRef.current?.readyState !== "open") setStatus("The other device left the pairing room");
-        if (packet.type === "expired" && channelRef.current?.readyState !== "open") setStatus("Pairing room expired — create a new one");
+        if (packet.type === "signal" && packet.payload) void receiveSignal(packet.payload).catch(() => reportConnectionError({
+          title: "Could not negotiate the direct connection",
+          detail: "The devices found each other, but the browser could not process the connection details. Create a new room and try again, or use another browser.",
+          code: "WEBRTC_SIGNAL_NEGOTIATION_FAILED",
+          stage: "Direct device connection",
+        }));
+        if (packet.type === "peer-left" && channelRef.current?.readyState !== "open") reportConnectionError({
+          title: "The other device left before connecting",
+          detail: peerRef.current
+            ? "The pairing service worked, but the direct device connection never opened before the other device left. If it was stuck on connecting, this Wi-Fi may be isolating devices; try a personal hotspot or private Wi-Fi."
+            : "The other device closed the room before the direct connection started. Ask them to keep the page open and pair again.",
+          code: peerRef.current ? "PEER_LEFT_DURING_DIRECT_CONNECT" : "PEER_LEFT_DURING_PAIRING",
+          stage: peerRef.current ? "Direct device connection" : "Pairing service",
+        });
+        if (packet.type === "expired" && channelRef.current?.readyState !== "open") reportConnectionError({
+          title: "The pairing room expired",
+          detail: "The devices did not finish pairing within five minutes. Create a new room and keep both pages open while connecting.",
+          code: "PAIRING_ROOM_EXPIRED",
+          stage: "Pairing service",
+        });
         if (packet.type === "error") {
-          setStatus(packet.message ?? "This pairing room is unavailable");
+          reportConnectionError({
+            title: packet.message ?? "This pairing room is unavailable",
+            detail: "The pairing service rejected this room. Create a new emoji room and try again.",
+            code: "PAIRING_SERVICE_REJECTED",
+            stage: "Pairing service",
+          });
           if (role === "host") setMode("idle");
         }
       } catch {
-        setStatus("Pairing message could not be read");
+        reportConnectionError({ title: "A pairing message could not be read", detail: "The pairing service returned an invalid response. Create a new room and try again.", code: "INVALID_SIGNALING_MESSAGE", stage: "Pairing service" });
       }
     });
-    socket.addEventListener("error", () => setStatus("Could not reach the pairing service"));
+    socket.addEventListener("error", () => reportConnectionError({
+      title: "Could not reach the pairing service",
+      detail: "The site could not exchange connection details. Check internet access, a VPN, content blocker, or network firewall, then try again.",
+      code: "SIGNALING_SERVICE_UNREACHABLE",
+      stage: "Pairing service",
+    }));
     socket.addEventListener("close", () => {
       if (channelRef.current?.readyState !== "open" && peerRef.current?.connectionState !== "connected") {
         setConnected(false);
@@ -218,6 +334,7 @@ export function LanTransfer() {
   }
 
   function resetPairing() {
+    clearConnectionTimers();
     socketRef.current?.close();
     peerRef.current?.close();
     socketRef.current = null;
@@ -227,6 +344,8 @@ export function LanTransfer() {
     negotiatingRef.current = false;
     setMode("idle");
     setConnected(false);
+    connectionErrorRef.current = null;
+    setConnectionError(null);
     setRoomCode([]);
     setRoomUrl("");
     setQrUrl("");
@@ -261,7 +380,12 @@ export function LanTransfer() {
     <div className="connection-panel">
       <div className="panel-title"><span>Pair devices</span><span>{connected ? "CONNECTED" : mode === "idle" ? "4 EMOJIS" : "PAIRING"}</span></div>
       <p className="privacy-note"><span>●</span> The temporary room relays connection details only. Files travel directly between browsers and are never stored by Kevin6.</p>
-      <div className="status-box good">{status}</div>
+      <div className={`status-box ${connectionError ? "error" : "good"}`} role={connectionError ? "alert" : "status"}>{status}</div>
+      {connectionError && <div className="connection-error" role="alert">
+        <strong>What went wrong</strong>
+        <p>{connectionError.detail}</p>
+        <div className="connection-diagnostic"><span>Failed at: {connectionError.stage}</span><code>{connectionError.code}</code></div>
+      </div>}
 
       {mode === "idle" && <>
         <div className="step"><span className="step-number">A</span><div><p className="field-label">On the first device</p><button className="button primary" onClick={createRoom}>Create an emoji room</button></div></div>
