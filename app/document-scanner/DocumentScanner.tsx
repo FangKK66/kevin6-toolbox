@@ -13,7 +13,11 @@ type WorkerReply = { id: number; ok: true; result: unknown } | { id: number; ok:
 type PdfPageSize = "auto" | "a4" | "letter";
 type ScannerProgressState = { label: string; value?: number };
 
-const ACCEPTED_IMAGES = "image/png,image/jpeg,image/webp,image/heic,image/heif,image/bmp,image/tiff,.heic,.heif,.bmp,.tif,.tiff";
+const ACCEPTED_IMAGES = [
+  "image/png", "image/jpeg", "image/webp", "image/avif", "image/gif", "image/heic", "image/heif", "image/bmp", "image/tiff",
+  ".png", ".apng", ".jpg", ".jpeg", ".jpe", ".jfif", ".webp", ".avif", ".gif", ".heic", ".heif", ".bmp", ".tif", ".tiff",
+  ".3fr", ".arw", ".cr2", ".cr3", ".dcr", ".dng", ".erf", ".fff", ".gpr", ".iiq", ".k25", ".kdc", ".mef", ".mos", ".mrw", ".nef", ".nrw", ".orf", ".pef", ".raf", ".raw", ".rw2", ".rwl", ".sr2", ".srf", ".srw", ".x3f",
+].join(",");
 const MAX_PAGES = 30;
 const MAX_FILE_BYTES = 30 * 1024 * 1024;
 const ANALYSIS_EDGE = 1500;
@@ -384,6 +388,7 @@ export function DocumentScanner() {
           <div className={`scanner-drop ${dragging ? "dragging" : ""}`} onDragEnter={(event) => { event.preventDefault(); setDragging(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={() => setDragging(false)} onDrop={drop}>
             <strong>Add receipts or documents</strong>
             <small>Drop several photos here, or choose an option</small>
+            <small>JPEG · PNG · WebP · HEIC · AVIF · GIF · BMP · TIFF · Camera RAW</small>
             <div className="scanner-pick-actions">
               <label className="button">Choose photos<input type="file" multiple accept={ACCEPTED_IMAGES} onChange={fileInput} /></label>
               <label className="button">Take a photo<input type="file" accept="image/*" capture="environment" onChange={fileInput} /></label>

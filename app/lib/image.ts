@@ -17,6 +17,10 @@ export function isRawFile(file: File) {
   return /\.(3fr|arw|cr2|cr3|dcr|dng|erf|fff|gpr|iiq|k25|kdc|mef|mos|mrw|nef|nrw|orf|pef|raf|raw|rw2|rwl|sr2|srf|srw|x3f)$/i.test(file.name);
 }
 
+function isBrowserImageFile(file: File) {
+  return file.type.startsWith("image/") || /\.(apng|avif|gif|jpe?g|jfif|png|webp)$/i.test(file.name);
+}
+
 export function needsDecodedPreview(file: File) {
   return isHeicFile(file) || isBmpFile(file) || isTiffFile(file) || isRawFile(file);
 }
@@ -113,7 +117,7 @@ export async function loadBitmap(file: File): Promise<ImageBitmap> {
     }
   }
 
-  if (!file.type.startsWith("image/")) {
+  if (!isBrowserImageFile(file)) {
     throw new Error("Please choose a supported image or camera RAW file.");
   }
 
