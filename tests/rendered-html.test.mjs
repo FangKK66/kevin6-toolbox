@@ -55,6 +55,14 @@ test("LAN transfer includes a staged connection diagnostic", async () => {
   assert.match(source, /Public Wi-Fi client isolation/i);
 });
 
+test("LAN transfer uses free STUN discovery and renders transfer progress", async () => {
+  const source = await readFile(new URL("../app/lan-transfer/LanTransfer.tsx", import.meta.url), "utf8");
+  assert.match(source, /stun:stun\.cloudflare\.com:3478/);
+  assert.match(source, /role="progressbar"/);
+  assert.match(source, /file-received/);
+  assert.match(source, /aria-valuenow/);
+});
+
 test("deployment config includes the SQLite pairing room", async () => {
   const config = JSON.parse(await readFile(new URL("../dist/server/wrangler.json", import.meta.url), "utf8"));
   assert.deepEqual(config.durable_objects?.bindings, [{ name: "PAIR_ROOMS", class_name: "PairRoom" }]);

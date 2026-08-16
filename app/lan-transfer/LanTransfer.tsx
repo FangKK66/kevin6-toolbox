@@ -4,8 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { FileDrop } from "../components/FileDrop";
 import { formatBytes } from "../lib/image";
 
-type LogItem = { id: number; text: string; remote?: boolean };
-type IncomingFile = { name: string; type: string; size: number; chunks: ArrayBuffer[]; received: number };
+type TransferStatus = "active" | "complete" | "error";
+type LogItem = { id: number; text: string; remote?: boolean; progress?: number; transferStatus?: TransferStatus };
+type IncomingFile = { id: string; logId: number; name: string; type: string; size: number; chunks: ArrayBuffer[]; received: number; lastProgress: number };
+type OutgoingFile = { logId: number; name: string; size: number };
 type PairRole = "host" | "guest";
 type PairMode = "idle" | "hosting" | "joining";
 type ConnectionError = {
@@ -51,6 +53,7 @@ export function LanTransfer() {
   const roleRef = useRef<PairRole | null>(null);
   const negotiatingRef = useRef(false);
   const incomingRef = useRef<IncomingFile | null>(null);
+  const outgoingRef = useRef(new Map<string, OutgoingFile>());
   const autoJoinedRef = useRef(false);
   const directTimeoutRef = useRef<number | null>(null);
   const disconnectedTimeoutRef = useRef<number | null>(null);
@@ -62,6 +65,7 @@ export function LanTransfer() {
   const [mode, setMode] = useState<PairMode>("idle");
   const [message, setMessage] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [sending, setSending] = useState(false);
   const [status, setStatus] = useState("Create a room or enter four emojis");
   const [connected, setConnected] = useState(false);
   const [logs, setLogs] = useState<LogItem[]>([]);
@@ -94,7 +98,29 @@ export function LanTransfer() {
     return () => { active = false; };
   }, [roomUrl]);
 
-  const log = (text: string, remote = false) => setLogs((items) => [...items, { id: Date.now() + Math.random(), text, remote }]);
+  function log(text: string, remote = false) {
+    const id = Date.now() + Math.random();
+    setLogs((items) => [...items, { id, text, remote }]);
+    return id;
+  }
+
+  function logTransfer(text: string, remote: boolean) {
+    const id = Date.now() + Math.random();
+    setLogs((items) => [...items, { id, text, remote, progress: 0, transferStatus: "active" }]);
+    return id;
+  }
+
+  function updateLog(id: number, changes: Partial<LogItem>) {
+    setLogs((items) => items.map((item) => item.id === id ? { ...item, ...changes } : item));
+  }
+
+  function failOutgoingTransfers(reason: string) {
+    for (const transfer of outgoingRef.current.values()) {
+      updateLog(transfer.logId, { text: `${reason} ${transfer.name}`, transferStatus: "error" });
+    }
+    outgoingRef.current.clear();
+    setSending(false);
+  }
 
   function clearConnectionTimers() {
     if (directTimeoutRef.current !== null) window.clearTimeout(directTimeoutRef.current);
@@ -128,7 +154,9 @@ export function LanTransfer() {
   function makePeer() {
     peerRef.current?.close();
     negotiatingRef.current = false;
-    const peer = new RTCPeerConnection({ iceServers: [] });
+    const peer = new RTCPeerConnection({
+      iceServers: [{ urls: ["stun:stun.cloudflare.com:3478", "stun:stun.cloudflare.com:53"] }],
+    });
     peerRef.current = peer;
     peer.addEventListener("connectionstatechange", () => {
       const state = peer.connectionState;
@@ -180,18 +208,26 @@ export function LanTransfer() {
     channel.addEventListener("close", () => {
       if (!roleRef.current) return;
       setConnected(false);
+      failOutgoingTransfers("Transfer interrupted while sending");
       if (!connectionErrorRef.current) setStatus("Direct connection closed");
     });
     channel.addEventListener("message", (event) => {
       if (typeof event.data === "string") {
-        const payload = JSON.parse(event.data) as { kind: string; text?: string; name?: string; type?: string; size?: number };
+        const payload = JSON.parse(event.data) as { kind: string; id?: string; text?: string; name?: string; type?: string; size?: number };
         if (payload.kind === "text") log(payload.text ?? "", true);
-        if (payload.kind === "file-start" && payload.name && typeof payload.size === "number") {
-          incomingRef.current = { name: payload.name, type: payload.type || "application/octet-stream", size: payload.size, chunks: [], received: 0 };
-          log(`Receiving ${payload.name} (${formatBytes(payload.size)})…`, true);
+        if (payload.kind === "file-start" && payload.id && payload.name && typeof payload.size === "number") {
+          const logId = logTransfer(`Receiving ${payload.name} (${formatBytes(payload.size)})`, true);
+          incomingRef.current = { id: payload.id, logId, name: payload.name, type: payload.type || "application/octet-stream", size: payload.size, chunks: [], received: 0, lastProgress: 0 };
         }
-        if (payload.kind === "file-end" && incomingRef.current) {
+        if (payload.kind === "file-end" && incomingRef.current && payload.id === incomingRef.current.id) {
           const incoming = incomingRef.current;
+          if (incoming.received !== incoming.size) {
+            const progress = incoming.size ? Math.min(99, Math.floor((incoming.received / incoming.size) * 100)) : 0;
+            updateLog(incoming.logId, { text: `Could not receive ${incoming.name} — file was incomplete`, progress, transferStatus: "error" });
+            channel.send(JSON.stringify({ kind: "file-failed", id: incoming.id }));
+            incomingRef.current = null;
+            return;
+          }
           const blob = new Blob(incoming.chunks, { type: incoming.type });
           const url = URL.createObjectURL(blob);
           const anchor = document.createElement("a");
@@ -199,12 +235,29 @@ export function LanTransfer() {
           anchor.download = incoming.name;
           anchor.click();
           setTimeout(() => URL.revokeObjectURL(url), 1000);
-          log(`Downloaded ${incoming.name} (${formatBytes(incoming.received)})`, true);
+          updateLog(incoming.logId, { text: `Downloaded ${incoming.name} (${formatBytes(incoming.received)})`, progress: 100, transferStatus: "complete" });
+          channel.send(JSON.stringify({ kind: "file-received", id: incoming.id }));
           incomingRef.current = null;
+        }
+        if ((payload.kind === "file-received" || payload.kind === "file-failed") && payload.id) {
+          const outgoing = outgoingRef.current.get(payload.id);
+          if (outgoing) {
+            updateLog(outgoing.logId, payload.kind === "file-received"
+              ? { text: `Sent ${outgoing.name} (${formatBytes(outgoing.size)})`, progress: 100, transferStatus: "complete" }
+              : { text: `The other device could not receive ${outgoing.name}`, transferStatus: "error" });
+            outgoingRef.current.delete(payload.id);
+            setSending(false);
+          }
         }
       } else if (event.data instanceof ArrayBuffer && incomingRef.current) {
         incomingRef.current.chunks.push(event.data);
         incomingRef.current.received += event.data.byteLength;
+        const incoming = incomingRef.current;
+        const progress = incoming.size ? Math.min(99, Math.floor((incoming.received / incoming.size) * 100)) : 99;
+        if (progress > incoming.lastProgress) {
+          incoming.lastProgress = progress;
+          updateLog(incoming.logId, { progress });
+        }
       }
     });
   }
@@ -344,6 +397,7 @@ export function LanTransfer() {
     negotiatingRef.current = false;
     setMode("idle");
     setConnected(false);
+    failOutgoingTransfers("Transfer cancelled while sending");
     connectionErrorRef.current = null;
     setConnectionError(null);
     setRoomCode([]);
@@ -364,16 +418,35 @@ export function LanTransfer() {
 
   async function sendFile() {
     const channel = channelRef.current;
-    if (!channel || channel.readyState !== "open" || !file) return;
-    channel.send(JSON.stringify({ kind: "file-start", name: file.name, type: file.type, size: file.size }));
-    const buffer = await file.arrayBuffer();
-    const chunkSize = 16 * 1024;
-    for (let offset = 0; offset < buffer.byteLength; offset += chunkSize) {
-      while (channel.bufferedAmount > 1024 * 1024) await new Promise((resolve) => setTimeout(resolve, 20));
-      channel.send(buffer.slice(offset, Math.min(offset + chunkSize, buffer.byteLength)));
+    if (!channel || channel.readyState !== "open" || !file || sending) return;
+    const selectedFile = file;
+    const transferId = crypto.randomUUID();
+    const logId = logTransfer(`Sending ${selectedFile.name} (${formatBytes(selectedFile.size)})`, false);
+    outgoingRef.current.set(transferId, { logId, name: selectedFile.name, size: selectedFile.size });
+    setSending(true);
+    try {
+      channel.send(JSON.stringify({ kind: "file-start", id: transferId, name: selectedFile.name, type: selectedFile.type, size: selectedFile.size }));
+      const buffer = await selectedFile.arrayBuffer();
+      const chunkSize = 16 * 1024;
+      let lastProgress = 0;
+      for (let offset = 0; offset < buffer.byteLength; offset += chunkSize) {
+        while (channel.bufferedAmount > 1024 * 1024) await new Promise((resolve) => setTimeout(resolve, 20));
+        if (channel.readyState !== "open") throw new Error("Data channel closed");
+        const end = Math.min(offset + chunkSize, buffer.byteLength);
+        channel.send(buffer.slice(offset, end));
+        const progress = buffer.byteLength ? Math.min(99, Math.floor((end / buffer.byteLength) * 100)) : 99;
+        if (progress > lastProgress) {
+          lastProgress = progress;
+          updateLog(logId, { progress });
+        }
+      }
+      channel.send(JSON.stringify({ kind: "file-end", id: transferId }));
+      updateLog(logId, { text: `Sent ${selectedFile.name} — waiting for the other device`, progress: 99 });
+    } catch {
+      outgoingRef.current.delete(transferId);
+      updateLog(logId, { text: `Could not send ${selectedFile.name}`, transferStatus: "error" });
+      setSending(false);
     }
-    channel.send(JSON.stringify({ kind: "file-end" }));
-    log(`Sent ${file.name} (${formatBytes(file.size)})`);
   }
 
   return <section className="tool-workspace transfer-layout">
@@ -410,9 +483,12 @@ export function LanTransfer() {
     <div className="connection-panel">
       <div className="panel-title"><span>Send directly</span><span>END-TO-END ENCRYPTED</span></div>
       <div className="field"><label>Text</label><textarea value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Type or paste a message" /><button className="button primary" disabled={!connected || !message.trim()} onClick={sendText}>Send text</button></div>
-      <div className="step"><span className="step-number">FILE</span><div><FileDrop onFile={setFile} label="Choose any file" accept="" /><p className="field-label">{file ? `${file.name} · ${formatBytes(file.size)}` : "Choose a file after connecting"}</p><button className="button primary" disabled={!connected || !file} onClick={sendFile}>Send file</button></div></div>
+      <div className="step"><span className="step-number">FILE</span><div><FileDrop onFile={setFile} label="Choose any file" accept="" /><p className="field-label">{file ? `${file.name} · ${formatBytes(file.size)}` : "Choose a file after connecting"}</p><button className="button primary" disabled={!connected || !file || sending} onClick={sendFile}>{sending ? "Sending file…" : "Send file"}</button></div></div>
       <div className="panel-title"><span>Activity</span><span>{logs.length}</span></div>
-      <div className="message-log">{logs.length ? logs.map((item) => <div className={`message ${item.remote ? "remote" : ""}`} key={item.id}>{item.text}</div>) : <div className="empty-state"><strong>No activity yet</strong><span>Pair another device to start</span></div>}</div>
+      <div className="message-log">{logs.length ? logs.map((item) => <div className={`message ${item.remote ? "remote" : ""} ${item.transferStatus ? `transfer ${item.transferStatus}` : ""}`} key={item.id}>
+        <div className="message-text">{item.text}{typeof item.progress === "number" && <span>{item.progress}%</span>}</div>
+        {typeof item.progress === "number" && <div className="transfer-progress" role="progressbar" aria-label={item.text} aria-valuemin={0} aria-valuemax={100} aria-valuenow={item.progress}><span style={{ width: `${item.progress}%` }} /></div>}
+      </div>) : <div className="empty-state"><strong>No activity yet</strong><span>Pair another device to start</span></div>}</div>
     </div>
   </section>;
 }

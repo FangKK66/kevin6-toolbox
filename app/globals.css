@@ -122,6 +122,15 @@ input[type="color"] { width: 100%; height: 40px; border: 1px solid var(--line); 
 .message-log { min-height: 250px; max-height: 380px; overflow: auto; border-radius: 10px; background: #10110e; padding: 14px; }
 .message { margin-bottom: 10px; border-left: 2px solid var(--acid); padding: 7px 10px; color: #d6d4cc; font-size: 12px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
 .message.remote { border-color: var(--blue); }
+.message.transfer { padding-block: 9px; }
+.message.transfer.complete { color: var(--paper); }
+.message.transfer.error { border-color: var(--orange); color: #ff9a7e; }
+.message-text { display: flex; justify-content: space-between; gap: 12px; }
+.message-text span { flex: 0 0 auto; color: var(--muted); font: 9px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.transfer-progress { height: 5px; margin-top: 8px; overflow: hidden; border-radius: 999px; background: rgba(240,238,229,.09); }
+.transfer-progress span { display: block; width: 0; height: 100%; border-radius: inherit; background: var(--acid); transition: width .15s ease; }
+.message.remote .transfer-progress span { background: var(--blue); }
+.message.error .transfer-progress span { background: var(--orange); }
 
 @media (max-width: 850px) {
   .catalog-hero { grid-template-columns: 1fr; min-height: 500px; }
