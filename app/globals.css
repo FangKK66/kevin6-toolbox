@@ -189,7 +189,7 @@ input[type="color"] { width: 100%; height: 40px; border: 1px solid var(--line); 
 .participant i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
 .participant.connected i { background: var(--acid); box-shadow: 0 0 0 4px rgba(217,255,87,.08); }
 .participant.failed i { background: var(--orange); }
-.participant small { color: var(--muted); font: 8px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; }
+.participant small { max-width: 190px; overflow: hidden; color: var(--muted); font: 8px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .participant input { accent-color: var(--acid); }
 .message-log { height: 380px; overflow-y: auto; overscroll-behavior: contain; border-radius: 10px; background: #10110e; padding: 14px; scrollbar-gutter: stable; }
 .message { margin-bottom: 10px; border-left: 2px solid var(--acid); padding: 7px 10px; color: #d6d4cc; font-size: 12px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }

@@ -7,7 +7,7 @@ import { formatBytes } from "../lib/image";
 type RoomMode = "idle" | "hosting" | "joining";
 type PeerStatus = "connecting" | "connected" | "failed";
 type TransferStatus = "active" | "complete" | "error";
-type Participant = { id: string; status: PeerStatus };
+type Participant = { id: string; status: PeerStatus; detail?: string };
 type RecipientProgress = { peerId: string; label: string; progress: number; status: TransferStatus };
 type ActivityItem = {
   id: string;
@@ -28,25 +28,23 @@ type IncomingFile = {
   lastProgress: number;
 };
 type OutgoingFile = { activityId: string; name: string; size: number; pending: Set<string>; failed: boolean };
-type PeerEntry = { peer: RTCPeerConnection; channel: RTCDataChannel | null; timeout: number | null };
+type SignalPayload =
+  | { kind: "description"; connectionId: string; description: RTCSessionDescriptionInit }
+  | { kind: "candidate"; connectionId: string; candidate: RTCIceCandidateInit };
+type PeerEntry = {
+  peer: RTCPeerConnection;
+  channel: RTCDataChannel | null;
+  timeout: number | null;
+  connectionId: string;
+  stage: string;
+  localDescriptionSent: boolean;
+  pendingLocalCandidates: RTCIceCandidateInit[];
+  pendingRemoteCandidates: RTCIceCandidateInit[];
+};
 
 const MAX_DEVICES = 4;
 const CONNECTION_TIMEOUT_MS = 15_000;
 const EMOJIS = Array.from("🐼🦊🐸🐙🦄🐝🦋🌵🍋🍉🍒🥨🍕🚀🚲🎸🎧🎲⚽🌈⭐🔥💎🎈");
-
-function waitForIce(peer: RTCPeerConnection) {
-  if (peer.iceGatheringState === "complete") return Promise.resolve();
-  return new Promise<void>((resolve) => {
-    const finish = () => {
-      clearTimeout(timer);
-      peer.removeEventListener("icegatheringstatechange", change);
-      resolve();
-    };
-    const change = () => { if (peer.iceGatheringState === "complete") finish(); };
-    const timer = window.setTimeout(finish, 3500);
-    peer.addEventListener("icegatheringstatechange", change);
-  });
-}
 
 function randomEmojiCode() {
   const values = crypto.getRandomValues(new Uint32Array(6));
@@ -66,8 +64,10 @@ export function GroupTransfer() {
   const activityLogRef = useRef<HTMLDivElement | null>(null);
   const followLatestActivityRef = useRef(true);
   const socketRef = useRef<WebSocket | null>(null);
+  const socketAcceptedRef = useRef(false);
   const selfIdRef = useRef("");
   const peersRef = useRef(new Map<string, PeerEntry>());
+  const earlyCandidatesRef = useRef(new Map<string, RTCIceCandidateInit[]>());
   const incomingRef = useRef(new Map<string, IncomingFile>());
   const outgoingRef = useRef(new Map<string, OutgoingFile>());
   const autoJoinedRef = useRef(false);
@@ -142,13 +142,13 @@ export function GroupTransfer() {
     }));
   }
 
-  function setParticipantStatus(id: string, nextStatus: PeerStatus) {
+  function setParticipantStatus(id: string, nextStatus: PeerStatus, detail?: string) {
     setParticipants((items) => items.some((item) => item.id === id)
-      ? items.map((item) => item.id === id ? { ...item, status: nextStatus } : item)
-      : [...items, { id, status: nextStatus }]);
+      ? items.map((item) => item.id === id ? { ...item, status: nextStatus, detail } : item)
+      : [...items, { id, status: nextStatus, detail }]);
   }
 
-  function signal(to: string, payload: RTCSessionDescriptionInit) {
+  function signal(to: string, payload: SignalPayload) {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify({ type: "signal", to, payload }));
     }
@@ -168,14 +168,18 @@ export function GroupTransfer() {
     }
   }
 
-  function removePeer(peerId: string) {
+  function disposePeer(peerId: string, failTransfers: boolean) {
     const entry = peersRef.current.get(peerId);
-    if (entry?.timeout !== null) window.clearTimeout(entry.timeout);
+    if (entry?.timeout != null) window.clearTimeout(entry.timeout);
     entry?.channel?.close();
     entry?.peer.close();
     peersRef.current.delete(peerId);
     incomingRef.current.delete(peerId);
-    markPeerTransfersFailed(peerId);
+    if (failTransfers) markPeerTransfersFailed(peerId);
+  }
+
+  function removePeer(peerId: string) {
+    disposePeer(peerId, true);
     setParticipants((items) => items.filter((item) => item.id !== peerId));
     setSelectedRecipients((items) => items.filter((id) => id !== peerId));
   }
@@ -186,45 +190,82 @@ export function GroupTransfer() {
     channel.binaryType = "arraybuffer";
     channel.addEventListener("open", () => {
       const current = peersRef.current.get(peerId);
-      if (current?.timeout !== null) window.clearTimeout(current.timeout);
+      if (current?.channel !== channel) return;
+      if (current?.timeout != null) window.clearTimeout(current.timeout);
       if (current) current.timeout = null;
-      setParticipantStatus(peerId, "connected");
+      if (current) current.stage = "CONNECTED";
+      setParticipantStatus(peerId, "connected", "CONNECTED");
       setSelectedRecipients((items) => items.includes(peerId) ? items : [...items, peerId]);
       setRoomError(null);
       setStatus("Group room ready");
       addActivity({ text: `${deviceLabel(peerId)} connected.` });
     });
     channel.addEventListener("close", () => {
-      if (!peersRef.current.has(peerId)) return;
-      setParticipantStatus(peerId, "failed");
+      if (peersRef.current.get(peerId)?.channel !== channel) return;
+      setParticipantStatus(peerId, "failed", "DATA CHANNEL CLOSED");
       setSelectedRecipients((items) => items.filter((id) => id !== peerId));
       markPeerTransfersFailed(peerId);
     });
     channel.addEventListener("message", (event) => handleChannelMessage(peerId, channel, event));
   }
 
-  function makePeer(peerId: string, initiator: boolean) {
-    removePeer(peerId);
-    setParticipantStatus(peerId, "connecting");
+  function makePeer(peerId: string, initiator: boolean, connectionId: string) {
+    disposePeer(peerId, false);
+    setParticipantStatus(peerId, "connecting", initiator ? "CREATING OFFER" : "READING OFFER");
     const peer = new RTCPeerConnection({
       iceServers: [{ urls: ["stun:stun.cloudflare.com:3478", "stun:stun.cloudflare.com:53"] }],
     });
-    const entry: PeerEntry = { peer, channel: null, timeout: null };
+    const earlyCandidateKey = `${peerId}:${connectionId}`;
+    const entry: PeerEntry = {
+      peer,
+      channel: null,
+      timeout: null,
+      connectionId,
+      stage: initiator ? "CREATING OFFER" : "READING OFFER",
+      localDescriptionSent: false,
+      pendingLocalCandidates: [],
+      pendingRemoteCandidates: earlyCandidatesRef.current.get(earlyCandidateKey) ?? [],
+    };
+    earlyCandidatesRef.current.delete(earlyCandidateKey);
     peersRef.current.set(peerId, entry);
-    peer.addEventListener("datachannel", (event) => prepareChannel(peerId, event.channel));
+    peer.addEventListener("datachannel", (event) => {
+      if (peersRef.current.get(peerId) === entry) prepareChannel(peerId, event.channel);
+    });
+    peer.addEventListener("icecandidate", (event) => {
+      if (!event.candidate || peersRef.current.get(peerId) !== entry) return;
+      const candidate: RTCIceCandidateInit = {
+        candidate: event.candidate.candidate,
+        sdpMid: event.candidate.sdpMid,
+        sdpMLineIndex: event.candidate.sdpMLineIndex,
+        usernameFragment: event.candidate.usernameFragment,
+      };
+      if (entry.localDescriptionSent) signal(peerId, { kind: "candidate", connectionId, candidate });
+      else entry.pendingLocalCandidates.push(candidate);
+    });
+    peer.addEventListener("iceconnectionstatechange", () => {
+      if (peersRef.current.get(peerId) !== entry || entry.channel?.readyState === "open") return;
+      entry.stage = `ICE ${peer.iceConnectionState.toUpperCase()}`;
+      setParticipantStatus(peerId, peer.iceConnectionState === "failed" ? "failed" : "connecting", entry.stage);
+    });
     peer.addEventListener("connectionstatechange", () => {
+      if (peersRef.current.get(peerId) !== entry) return;
       if (peer.connectionState === "failed") {
-        setParticipantStatus(peerId, "failed");
+        entry.stage = `CONNECTION FAILED · ICE ${peer.iceConnectionState.toUpperCase()}`;
+        setParticipantStatus(peerId, "failed", entry.stage);
         setSelectedRecipients((items) => items.filter((id) => id !== peerId));
         markPeerTransfersFailed(peerId);
       }
-      if (peer.connectionState === "connected") setParticipantStatus(peerId, "connected");
+      if (peer.connectionState === "connected") {
+        const channelOpen = entry.channel?.readyState === "open";
+        setParticipantStatus(peerId, channelOpen ? "connected" : "connecting", channelOpen ? "CONNECTED" : "OPENING DATA CHANNEL");
+      }
     });
     entry.timeout = window.setTimeout(() => {
       if (entry.channel?.readyState !== "open") {
-        setParticipantStatus(peerId, "failed");
+        entry.stage = `TIMEOUT · ${entry.stage} · ICE ${peer.iceConnectionState.toUpperCase()}`;
+        setParticipantStatus(peerId, "failed", entry.stage);
         setSelectedRecipients((items) => items.filter((id) => id !== peerId));
-        setRoomError(`${deviceLabel(peerId)} could not connect directly. Public Wi-Fi isolation or a firewall may be blocking this device.`);
+        setRoomError(`${deviceLabel(peerId)} stopped at ${entry.stage}. The room was reached, but this peer connection did not finish.`);
       }
     }, CONNECTION_TIMEOUT_MS);
     if (initiator) {
@@ -234,22 +275,77 @@ export function GroupTransfer() {
     return peer;
   }
 
-  async function offerPeer(peerId: string) {
-    const peer = makePeer(peerId, true);
-    await peer.setLocalDescription(await peer.createOffer());
-    await waitForIce(peer);
-    if (peer.localDescription) signal(peerId, peer.localDescription);
+  function sendLocalDescription(peerId: string, entry: PeerEntry) {
+    if (!entry.peer.localDescription || peersRef.current.get(peerId) !== entry) return;
+    signal(peerId, {
+      kind: "description",
+      connectionId: entry.connectionId,
+      description: {
+        type: entry.peer.localDescription.type,
+        sdp: entry.peer.localDescription.sdp,
+      },
+    });
+    entry.localDescriptionSent = true;
+    for (const candidate of entry.pendingLocalCandidates) {
+      signal(peerId, { kind: "candidate", connectionId: entry.connectionId, candidate });
+    }
+    entry.pendingLocalCandidates = [];
   }
 
-  async function receiveSignal(from: string, payload: RTCSessionDescriptionInit) {
-    if (payload.type === "offer") {
-      const peer = makePeer(from, false);
-      await peer.setRemoteDescription(payload);
+  async function flushRemoteCandidates(entry: PeerEntry) {
+    if (!entry.peer.remoteDescription) return;
+    const candidates = entry.pendingRemoteCandidates.splice(0);
+    for (const candidate of candidates) await entry.peer.addIceCandidate(candidate);
+  }
+
+  async function offerPeer(peerId: string) {
+    const connectionId = crypto.randomUUID();
+    const peer = makePeer(peerId, true, connectionId);
+    const entry = peersRef.current.get(peerId);
+    if (!entry) return;
+    await peer.setLocalDescription(await peer.createOffer());
+    entry.stage = "OFFER SENT";
+    setParticipantStatus(peerId, "connecting", entry.stage);
+    sendLocalDescription(peerId, entry);
+  }
+
+  async function receiveSignal(from: string, payload: SignalPayload) {
+    if (payload.kind === "candidate") {
+      const entry = peersRef.current.get(from);
+      if (entry && entry.connectionId !== payload.connectionId) return;
+      if (!entry) {
+        const key = `${from}:${payload.connectionId}`;
+        const queued = earlyCandidatesRef.current.get(key) ?? [];
+        if (queued.length < 64) queued.push(payload.candidate);
+        earlyCandidatesRef.current.set(key, queued);
+      } else if (entry.peer.remoteDescription) {
+        await entry.peer.addIceCandidate(payload.candidate);
+      } else if (entry.pendingRemoteCandidates.length < 64) {
+        entry.pendingRemoteCandidates.push(payload.candidate);
+      }
+      return;
+    }
+
+    const description = payload.description;
+    if (description.type === "offer") {
+      const current = peersRef.current.get(from);
+      if (current?.connectionId === payload.connectionId && current.peer.remoteDescription) return;
+      const peer = makePeer(from, false, payload.connectionId);
+      const entry = peersRef.current.get(from);
+      if (!entry) return;
+      await peer.setRemoteDescription(description);
+      await flushRemoteCandidates(entry);
       await peer.setLocalDescription(await peer.createAnswer());
-      await waitForIce(peer);
-      if (peer.localDescription) signal(from, peer.localDescription);
-    } else if (payload.type === "answer") {
-      await peersRef.current.get(from)?.peer.setRemoteDescription(payload);
+      entry.stage = "ANSWER SENT";
+      setParticipantStatus(from, "connecting", entry.stage);
+      sendLocalDescription(from, entry);
+    } else if (description.type === "answer") {
+      const entry = peersRef.current.get(from);
+      if (!entry || entry.connectionId !== payload.connectionId || entry.peer.remoteDescription) return;
+      await entry.peer.setRemoteDescription(description);
+      await flushRemoteCandidates(entry);
+      entry.stage = "CHECKING DIRECT PATH";
+      setParticipantStatus(from, "connecting", entry.stage);
     }
   }
 
@@ -325,19 +421,39 @@ export function GroupTransfer() {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const socket = new WebSocket(`${protocol}//${window.location.host}/toolbox/api/group/${encodeURIComponent(code)}`);
     socketRef.current = socket;
+    socketAcceptedRef.current = false;
     socket.addEventListener("message", (event) => {
+      if (socketRef.current !== socket) return;
+      if (typeof event.data !== "string") {
+        setRoomError("The group pairing service sent an unsupported binary message.");
+        setStatus("Could not read a pairing message");
+        return;
+      }
+      let packet: { type: string; participantId?: string; participants?: string[]; from?: string; payload?: SignalPayload; message?: string };
       try {
-        const packet = JSON.parse(event.data) as { type: string; participantId?: string; participants?: string[]; from?: string; payload?: RTCSessionDescriptionInit; message?: string };
+        packet = JSON.parse(event.data) as typeof packet;
+      } catch {
+        setRoomError(`The group pairing service sent invalid JSON (${event.data.length} characters).`);
+        setStatus("Could not read a pairing message");
+        return;
+      }
+
+      try {
         if (packet.type === "welcome" && packet.participantId) {
           setRoomAccepted(true);
+          socketAcceptedRef.current = true;
           selfIdRef.current = packet.participantId;
           const existing = packet.participants ?? [];
-          setParticipants(existing.map((id) => ({ id, status: "connecting" })));
+          setParticipants(existing.map((id) => ({ id, status: "connecting", detail: "WAITING TO OFFER" })));
           setStatus(existing.length ? "Connecting to the group…" : "Room ready — waiting for other devices");
-          for (const peerId of existing) void offerPeer(peerId).catch(() => setParticipantStatus(peerId, "failed"));
+          for (const peerId of existing) void offerPeer(peerId).catch((error: unknown) => {
+            const detail = error instanceof Error ? `${error.name}: ${error.message}` : "Unknown error";
+            setParticipantStatus(peerId, "failed", `OFFER FAILED · ${detail.toUpperCase()}`);
+            setRoomError(`${deviceLabel(peerId)} could not create an offer (${detail}).`);
+          });
         }
         if (packet.type === "participant-joined" && packet.participantId) {
-          setParticipantStatus(packet.participantId, "connecting");
+          setParticipantStatus(packet.participantId, "connecting", "WAITING FOR OFFER");
           setStatus("A device joined — connecting directly…");
         }
         if (packet.type === "participant-left" && packet.participantId) {
@@ -345,9 +461,10 @@ export function GroupTransfer() {
           removePeer(packet.participantId);
         }
         if (packet.type === "signal" && packet.from && packet.payload) {
-          void receiveSignal(packet.from, packet.payload).catch(() => {
-            setParticipantStatus(packet.from as string, "failed");
-            setRoomError(`${deviceLabel(packet.from as string)} could not complete WebRTC negotiation.`);
+          void receiveSignal(packet.from, packet.payload).catch((error: unknown) => {
+            const detail = error instanceof Error ? `${error.name}: ${error.message}` : "Unknown error";
+            setParticipantStatus(packet.from as string, "failed", `SIGNAL FAILED · ${detail.toUpperCase()}`);
+            setRoomError(`${deviceLabel(packet.from as string)} could not process its WebRTC signal (${detail}).`);
           });
         }
         if (packet.type === "expired") {
@@ -358,22 +475,40 @@ export function GroupTransfer() {
           setRoomError(packet.message ?? "This group room is unavailable.");
           setStatus("Could not join the group room");
         }
-      } catch {
-        setRoomError("A group room message could not be read.");
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "Unknown message processing error";
+        setRoomError(`A valid group room message failed during processing: ${detail}`);
+        setStatus("Pairing message processing failed");
       }
     });
-    socket.addEventListener("error", () => setRoomError("Could not reach the group pairing service."));
+    socket.addEventListener("error", () => {
+      if (socketRef.current !== socket) return;
+      setRoomError(socketAcceptedRef.current
+        ? "The group pairing connection encountered a network error after the room was joined."
+        : "Could not reach the group pairing service.");
+      setStatus(socketAcceptedRef.current ? "Group pairing connection interrupted" : "Could not join the group room");
+    });
+    socket.addEventListener("close", (event) => {
+      if (socketRef.current !== socket) return;
+      socketRef.current = null;
+      const reason = event.reason ? ` · ${event.reason}` : "";
+      setRoomError(`The group pairing connection closed (code ${event.code}${reason}).`);
+      setStatus("Group pairing connection closed");
+    });
   }
 
   function closeRoom() {
-    socketRef.current?.close();
+    const socket = socketRef.current;
     socketRef.current = null;
+    socketAcceptedRef.current = false;
+    socket?.close(1000, "Leaving group");
     for (const entry of peersRef.current.values()) {
       if (entry.timeout !== null) window.clearTimeout(entry.timeout);
       entry.channel?.close();
       entry.peer.close();
     }
     peersRef.current.clear();
+    earlyCandidatesRef.current.clear();
     incomingRef.current.clear();
     outgoingRef.current.clear();
     selfIdRef.current = "";
@@ -503,7 +638,7 @@ export function GroupTransfer() {
           <div className="participant connected"><span><i />This device</span><small>CONNECTED</small></div>
           {participants.map((participant) => <label className={`participant ${participant.status}`} key={participant.id}>
             <span><i />{deviceLabel(participant.id)}</span>
-            <span><small>{participant.status.toUpperCase()}</small><input type="checkbox" checked={selectedRecipients.includes(participant.id)} disabled={participant.status !== "connected"} onChange={() => toggleRecipient(participant.id)} aria-label={`Send to ${deviceLabel(participant.id)}`} /></span>
+            <span><small title={participant.detail}>{participant.detail ?? participant.status.toUpperCase()}</small><input type="checkbox" checked={selectedRecipients.includes(participant.id)} disabled={participant.status !== "connected"} onChange={() => toggleRecipient(participant.id)} aria-label={`Send to ${deviceLabel(participant.id)}`} /></span>
           </label>)}
         </div>}
         <button className="button pair-reset" onClick={resetRoom}>Leave group</button>

@@ -72,6 +72,10 @@ test("Group Transfer implements a four-device targeted mesh", async () => {
   assert.match(source, /stun:stun\.cloudflare\.com:3478/);
   assert.match(source, /file-received/);
   assert.match(source, /recipient-progress/);
+  assert.match(source, /icecandidate/);
+  assert.match(source, /connectionId/);
+  assert.match(source, /entry\?\.timeout != null/);
+  assert.match(source, /WAITING FOR OFFER|OFFER SENT/);
 });
 
 test("deployment config includes the SQLite pairing room", async () => {
