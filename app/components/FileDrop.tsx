@@ -2,17 +2,25 @@
 
 import { useRef, useState } from "react";
 
-export function FileDrop({ onFile, label = "Choose an image", accept = "image/*" }: { onFile: (file: File) => void; label?: string; accept?: string }) {
+type FileDropProps = {
+  onFile?: (file: File) => void;
+  onFiles?: (files: File[]) => void;
+  label?: string;
+  accept?: string;
+  multiple?: boolean;
+};
+
+export function FileDrop({ onFile, onFiles, label = "Choose an image", accept = "image/*", multiple = false }: FileDropProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
-  const [selectedName, setSelectedName] = useState("");
+  const [selectedLabel, setSelectedLabel] = useState("");
 
   function pick(files: FileList | null) {
-    const file = files?.[0];
-    if (file) {
-      setSelectedName(file.name);
-      onFile(file);
-    }
+    if (!files?.length) return;
+    const picked = multiple ? Array.from(files) : [files[0]];
+    setSelectedLabel(picked.length === 1 ? picked[0].name : `${picked.length} files selected`);
+    onFiles?.(picked);
+    onFile?.(picked[0]);
   }
 
   return (
@@ -24,11 +32,11 @@ export function FileDrop({ onFile, label = "Choose an image", accept = "image/*"
       onDragLeave={() => setDragging(false)}
       onDrop={(event) => { event.preventDefault(); setDragging(false); pick(event.dataTransfer.files); }}
     >
-      <input ref={inputRef} type="file" accept={accept} onChange={(event) => pick(event.target.files)} />
+      <input ref={inputRef} type="file" accept={accept} multiple={multiple} onChange={(event) => { pick(event.target.files); event.currentTarget.value = ""; }} />
       <span>
         <strong>{label}</strong>
-        <small>Drop a file here or tap to browse</small>
-        {selectedName && <small className="selected-file" title={selectedName}>Selected: {selectedName}</small>}
+        <small>{multiple ? "Drop files here or tap to browse" : "Drop a file here or tap to browse"}</small>
+        {selectedLabel && <small className="selected-file" title={selectedLabel}>Selected: {selectedLabel}</small>}
       </span>
     </label>
   );

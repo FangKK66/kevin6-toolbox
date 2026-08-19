@@ -63,6 +63,8 @@ test("LAN transfer uses free STUN discovery and renders transfer progress", asyn
   assert.match(source, /role="progressbar"/);
   assert.match(source, /file-received/);
   assert.match(source, /aria-valuenow/);
+  assert.match(source, /onFiles=\{setFiles\}/);
+  assert.match(source, /Sending \$\{fileIndex \+ 1\} of \$\{selectedFiles\.length\}/);
 });
 
 test("Group Transfer implements a four-device targeted mesh", async () => {
