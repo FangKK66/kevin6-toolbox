@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const routes = [
-  ["/toolbox/", "Pick a tool."],
+  ["/toolbox/", "What do you"],
   ["/toolbox/image-converter/", "Image Converter"],
   ["/toolbox/image-rotate/", "Image Rotate"],
   ["/toolbox/image-overlay/", "Image Overlay"],
@@ -35,6 +35,15 @@ for (const [path, expected] of routes) {
 test("homepage links remain inside the /toolbox base path", async () => {
   const html = await (await render("/toolbox/")).text();
   for (const [path] of routes.slice(1)) assert.match(html, new RegExp(`href=["']${path}["']`));
+});
+
+test("homepage tool selector exposes search and category filters", async () => {
+  const html = await (await render("/toolbox/")).text();
+  assert.match(html, /Search by action, format or device/i);
+  assert.match(html, /ALL[\s\S]*06/i);
+  assert.match(html, /IMAGE[\s\S]*03/i);
+  assert.match(html, /TRANSFER[\s\S]*02/i);
+  assert.match(html, /DOCUMENT[\s\S]*01/i);
 });
 
 test("redirects the bare toolbox path to its canonical URL", async () => {

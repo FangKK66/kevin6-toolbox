@@ -1,12 +1,14 @@
 import type { ReactNode } from "react";
 
-export function ToolShell({ children, compact = false }: { children: ReactNode; compact?: boolean }) {
+export function ToolShell({ children, compact = false, catalog = false }: { children: ReactNode; compact?: boolean; catalog?: boolean }) {
+  const shellClassName = ["site-shell", compact ? "compact" : "", catalog ? "catalog-shell" : ""].filter(Boolean).join(" ");
+
   return (
-    <main className={compact ? "site-shell compact" : "site-shell"}>
+    <main className={shellClassName}>
       <header className="topbar">
         <a className="brand" href="https://kevin6.com/" aria-label="Kevin6 home">
-          <span className="brand-mark">K6</span>
-          <span>kevin6.com</span>
+          {catalog ? <span className="catalog-brand-word">KEVIN6.</span> : <span className="brand-mark">K6</span>}
+          {!catalog && <span>kevin6.com</span>}
         </a>
         <a className="toolbox-label" href="/toolbox/">
           <span className="live-dot" /> TOOLBOX
